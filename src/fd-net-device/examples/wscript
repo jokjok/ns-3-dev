@@ -9,6 +9,10 @@ def build(bld):
     obj.source = 'dummy-network.cc'
     obj = bld.create_ns3_program('fd2fd-onoff', ['fd-net-device', 'internet', 'applications'])
     obj.source = 'fd2fd-onoff.cc'
+    obj = bld.create_ns3_program('netmap-device-get-infos', ['fd-net-device'])
+    obj.source = 'netmap-device-get-infos.cc'
+    obj = bld.create_ns3_program('nm2nm-onoff', ['fd-net-device', 'internet', 'applications'])
+    obj.source = 'nm2nm-onoff.cc'
 
     if bld.env["ENABLE_REAL_TIME"]:
         obj = bld.create_ns3_program('realtime-dummy-network', ['fd-net-device', 'internet', 'applications'])

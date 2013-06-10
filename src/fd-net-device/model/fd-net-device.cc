@@ -149,16 +149,16 @@ FdNetDevice::GetTypeId (void)
 }
 
 FdNetDevice::FdNetDevice ()
-  : m_node (0),
+  : m_startEvent (),
+    m_stopEvent (),
+    m_node (0),
     m_ifIndex (0),
-    m_mtu (1500), // Defaults to Ethernet v2 MTU 
+    m_mtu (1500), // Defaults to Ethernet v2 MTU
     m_fd (-1),
     m_fdReader (0),
     m_isBroadcast (true),
     m_isMulticast (false),
-    m_pendingReadCount (0),
-    m_startEvent (),
-    m_stopEvent ()
+    m_pendingReadCount (0)
 {
   NS_LOG_FUNCTION (this);
   Start (m_tStart);
@@ -598,11 +598,11 @@ FdNetDevice::GetChannel (void) const
 bool
 FdNetDevice::SetMtu (const uint16_t mtu)
 {
-  // The MTU depends on the technology associated to 
+  // The MTU depends on the technology associated to
   // the file descriptor. The user is responsible of
   // setting the correct value of the MTU.
   // If the file descriptor is created using a helper,
-  // then is the responsibility of the helper to set 
+  // then is the responsibility of the helper to set
   // the correct MTU value.
   m_mtu = mtu;
   return true;

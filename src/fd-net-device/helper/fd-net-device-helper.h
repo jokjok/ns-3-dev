@@ -95,6 +95,8 @@ protected:
    */
   virtual Ptr<NetDevice> InstallPriv (Ptr<Node> node) const;
 
+  ObjectFactory m_deviceFactory;
+
 private:
   /**
    * \brief Enable pcap output on the indicated net device.
@@ -125,8 +127,6 @@ private:
                                     std::string prefix,
                                     Ptr<NetDevice> nd,
                                     bool explicitFilename);
-
-  ObjectFactory m_deviceFactory;
 };
 
 } // namespace ns3

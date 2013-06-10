@@ -14,28 +14,27 @@ def configure(conf):
 
     if conf.env['ENABLE_THREADING']:
         # Check for system dependencies
-        have_sysioctl = conf.check_nonfatal(header_name='sys/ioctl.h', 
+        have_sysioctl = conf.check_nonfatal(header_name='sys/ioctl.h',
             define_name = 'HAVE_SYS_IOCTL_H')
         have_netif =  conf.check_nonfatal(header_name='net/if.h',
             define_name = 'HAVE_IF_NETS_H')
 
-        # Enable the FdNetDevice module. 
+        # Enable the FdNetDevice module.
         # Besides threading support, we also require ethernet.h
         conf.env['ENABLE_FDNETDEV'] = conf.check_nonfatal(header_name='net/ethernet.h',
                                                           define_name='HAVE_NET_ETHERNET_H')
         if conf.env['ENABLE_FDNETDEV']:
-            conf.report_optional_feature("FdNetDevice", 
+            conf.report_optional_feature("FdNetDevice",
                                          "File descriptor NetDevice",
                                          True,
                                          "FdNetDevice module enabled")
         else:
-            conf.report_optional_feature("FdNetDevice", 
+            conf.report_optional_feature("FdNetDevice",
                                          "File descriptor NetDevice",
                                          False,
                                          "<net/ethernet.h> include not detected")
-
     else:
-        conf.report_optional_feature("FdNetDevice", 
+        conf.report_optional_feature("FdNetDevice",
             "File descriptor NetDevice",
             False,
             "needs threading support which is not available")
@@ -51,20 +50,20 @@ def configure(conf):
 
     # Next, check for whether specialized FdNetDevice features are enabled
     # such as tap device support, raw socket support, and planetlab
-    
+
     if conf.env['ENABLE_FDNETDEV']:
         conf.env['ENABLE_TAP'] = conf.check_nonfatal(
-           header_name='linux/if_tun.h', 
+           header_name='linux/if_tun.h',
            define_name='HAVE_IF_TUN_H') and have_sysioctl and have_netif
 
         if conf.env['ENABLE_TAP']:
-            conf.report_optional_feature("TapFdNetDevice", 
-                "Tap FdNetDevice", 
+            conf.report_optional_feature("TapFdNetDevice",
+                "Tap FdNetDevice",
                 True,
                 "Tap support enabled")
         else:
-            conf.report_optional_feature("TapFdNetDevice", 
-                "Tap FdNetDevice", 
+            conf.report_optional_feature("TapFdNetDevice",
+                "Tap FdNetDevice",
                 False,
                 "needs linux/if_tun.h")
 
@@ -74,30 +73,30 @@ def configure(conf):
            define_name='HAVE_PACKET_H') and have_sysioctl and have_netif
 
         if conf.env['ENABLE_EMU']:
-            conf.report_optional_feature("EmuFdNetDevice", 
-                "Emulation FdNetDevice", 
+            conf.report_optional_feature("EmuFdNetDevice",
+                "Emulation FdNetDevice",
                 True,
                 "Emulation support enabled")
         else:
-            conf.report_optional_feature("EmuFdNetDevice", 
-                "Emulation FdNetDevice", 
+            conf.report_optional_feature("EmuFdNetDevice",
+                "Emulation FdNetDevice",
                 False,
                 "needs netpacket/packet.h")
 
         # Enable use of PlanetLab TAP helper
-        # TODO: How to validate 
+        # TODO: How to validate
         (sysname, nodename, release, version, machine) = os.uname()
         if release.find('onelab') != -1 or Options.options.force_planetlab:
             conf.env['ENABLE_PLANETLAB'] = True
 
         if conf.env['ENABLE_PLANETLAB']:
-            conf.report_optional_feature("PlanetLabFdNetDevice", 
-                "PlanetLab FdNetDevice", 
+            conf.report_optional_feature("PlanetLabFdNetDevice",
+                "PlanetLab FdNetDevice",
                 True,
                 "Planetlab support enabled")
         else:
-            conf.report_optional_feature("PlanetLabFdNetDevice", 
-                "PlanetLab FdNetDevice", 
+            conf.report_optional_feature("PlanetLabFdNetDevice",
+                "PlanetLab FdNetDevice",
                 False,
                 "PlanetLab operating system not detected (see option --force-planetlab)")
 
@@ -109,6 +108,9 @@ def build(bld):
     module = bld.create_ns3_module('fd-net-device', ['network'])
     module.source = [
         'model/fd-net-device.cc',
+        'model/netmap-net-device.cc',
+        'model/netmap-priv-impl.cc',
+        'helper/netmap-net-device-helper.cc',
         'helper/fd-net-device-helper.cc',
         'helper/encode-decode.cc',
         'helper/creator-utils.cc',
@@ -117,6 +119,9 @@ def build(bld):
     headers = bld(features='ns3header')
     headers.module = 'fd-net-device'
     headers.source = [
+        'model/netmap-net-device.h',
+        'model/netmap.h',
+        'model/netmap_user.h',
         'model/fd-net-device.h',
         'helper/fd-net-device-helper.h',
         ]
@@ -138,7 +143,7 @@ def build(bld):
                 'helper/creator-utils.cc',
             ]
 
-        module.env.append_value("DEFINES", 
+        module.env.append_value("DEFINES",
            "TAP_DEV_CREATOR=\"%s\"" % (creator.target,))
 
     if bld.env['ENABLE_EMU']:
@@ -157,7 +162,7 @@ def build(bld):
            'helper/creator-utils.cc',
         ]
 
-        module.env.append_value("DEFINES", 
+        module.env.append_value("DEFINES",
            "RAW_SOCK_CREATOR=\"%s\"" % (creator.target,))
 
     if bld.env['ENABLE_PLANETLAB']:
@@ -176,7 +181,7 @@ def build(bld):
            'helper/creator-utils.cc',
         ]
 
-        module.env.append_value("DEFINES", 
+        module.env.append_value("DEFINES",
            "PLANETLAB_TAP_CREATOR=\"%s\"" % (creator.target,))
 
     if bld.env['ENABLE_EXAMPLES']:

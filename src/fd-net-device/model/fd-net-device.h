@@ -56,7 +56,7 @@ public:
 
 private:
   FdReader::Data DoRead (void);
-  
+
   uint32_t m_bufferSize;
 };
 
@@ -176,6 +176,25 @@ public:
 protected:
   virtual void DoDispose (void);
 
+  EventId m_startEvent;
+  EventId m_stopEvent;
+
+  /**
+   * \internal
+   *
+   * Flag indicating whether or not the link is up.  In this case,
+   * whether or not the device is connected to a channel.
+   */
+  bool m_linkUp;
+
+  /**
+   * The trace source fired when packets coming into the "top" of the device
+   * at the L3/L2 transition are dropped before being queued for transmission.
+   *
+   * \see class CallBackTraceSource
+   */
+  TracedCallback<Ptr<const Packet> > m_macTxDropTrace;
+
 private:
   // private copy constructor as sugested in:
   // http://www.nsnam.org/wiki/NS-3_Python_Bindings#.22invalid_use_of_incomplete_type.22
@@ -279,14 +298,6 @@ private:
   /**
    * \internal
    *
-   * Flag indicating whether or not the link is up.  In this case,
-   * whether or not the device is connected to a channel.
-   */
-  bool m_linkUp;
-
-  /**
-   * \internal
-   *
    * Callbacks to fire if the link changes state (up or down).
    */
   TracedCallback<> m_linkChangeCallbacks;
@@ -313,15 +324,15 @@ private:
    * Number of packets that were received and scheduled for read but not yeat read.
    */
   uint32_t m_pendingReadCount;
-  
+
   /**
    * \internal
    *
    * Maximum number of packets that can be received and scheduled for read but not yeat read.
    */
   uint32_t m_maxPendingReads;
-  
-   
+
+
   /**
    * \internal
    *
@@ -343,9 +354,6 @@ private:
    */
   Time m_tStop;
 
-  EventId m_startEvent;
-  EventId m_stopEvent;
-
   /**
    * The callback used to notify higher layers that a packet has been received.
    */
@@ -363,14 +371,6 @@ private:
    * \see class CallBackTraceSource
    */
   TracedCallback<Ptr<const Packet> > m_macTxTrace;
-
-  /**
-   * The trace source fired when packets coming into the "top" of the device
-   * at the L3/L2 transition are dropped before being queued for transmission.
-   *
-   * \see class CallBackTraceSource
-   */
-  TracedCallback<Ptr<const Packet> > m_macTxDropTrace;
 
   /**
    * The trace source fired for packets successfully received by the device
