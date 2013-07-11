@@ -60,11 +60,19 @@ public:
    */
   uint32_t GetSize (void) const;
 
+  enum OwnerType {
+    BURST,
+    USER
+  };
+
+  void SetPacketsOwner(OwnerType);
+
   std::list<Ptr<Packet> >::const_iterator Begin (void) const;
   std::list<Ptr<Packet> >::const_iterator End (void) const;
 private:
   void DoDispose (void);
   std::list<Ptr<Packet> > m_packets;
+  OwnerType m_owner;
 };
 } // namespace ns3
 
