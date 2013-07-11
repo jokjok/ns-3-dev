@@ -188,12 +188,74 @@ protected:
   bool m_linkUp;
 
   /**
+   * \internal
+   *
+   * The typ of encapsulation of the received/transmited frames.
+   */
+  EncapsulationMode m_encapMode;
+
+  /**
+   * \internal
+   *
+   * The MTU associated to the file descriptor technology
+   */
+  uint16_t m_mtu;
+
+  /**
    * The trace source fired when packets coming into the "top" of the device
    * at the L3/L2 transition are dropped before being queued for transmission.
    *
    * \see class CallBackTraceSource
    */
   TracedCallback<Ptr<const Packet> > m_macTxDropTrace;
+
+  /**
+   * The trace source fired when packets come into the "top" of the device
+   * at the L3/L2 transition, before being queued for transmission.
+   *
+   * \see class CallBackTraceSource
+   */
+  TracedCallback<Ptr<const Packet> > m_macTxTrace;
+
+  /**
+   * A trace source that emulates a non-promiscuous protocol sniffer connected
+   * to the device.  Unlike your average everyday sniffer, this trace source
+   * will not fire on PACKET_OTHERHOST events.
+   *
+   * On the transmit size, this trace hook will fire after a packet is dequeued
+   * from the device queue for transmission.  In Linux, for example, this would
+   * correspond to the point just before a device hard_start_xmit where
+   * dev_queue_xmit_nit is called to dispatch the packet to the PF_PACKET
+   * ETH_P_ALL handlers.
+   *
+   * On the receive side, this trace hook will fire when a packet is received,
+   * just before the receive callback is executed.  In Linux, for example,
+   * this would correspond to the point at which the packet is dispatched to
+   * packet sniffers in netif_receive_skb.
+   *
+   * \see class CallBackTraceSource
+   */
+  TracedCallback<Ptr<const Packet> > m_snifferTrace;
+
+  /**
+   * A trace source that emulates a promiscuous mode protocol sniffer connected
+   * to the device.  This trace source fire on packets destined for any host
+   * just like your average everyday packet sniffer.
+   *
+   * On the transmit size, this trace hook will fire after a packet is dequeued
+   * from the device queue for transmission.  In Linux, for example, this would
+   * correspond to the point just before a device hard_start_xmit where
+   * dev_queue_xmit_nit is called to dispatch the packet to the PF_PACKET
+   * ETH_P_ALL handlers.
+   *
+   * On the receive side, this trace hook will fire when a packet is received,
+   * just before the receive callback is executed.  In Linux, for example,
+   * this would correspond to the point at which the packet is dispatched to
+   * packet sniffers in netif_receive_skb.
+   *
+   * \see class CallBackTraceSource
+   */
+  TracedCallback<Ptr<const Packet> > m_promiscSnifferTrace;
 
 private:
   // private copy constructor as sugested in:
@@ -263,13 +325,6 @@ private:
   /**
    * \internal
    *
-   * The MTU associated to the file descriptor technology
-   */
-  uint16_t m_mtu;
-
-  /**
-   * \internal
-   *
    * The file descriptor used for receive/send network traffic.
    */
   int m_fd;
@@ -287,13 +342,6 @@ private:
    * The net device mac address.
    */
   Mac48Address m_address;
-
-  /**
-   * \internal
-   *
-   * The typ of encapsulation of the received/transmited frames.
-   */
-  EncapsulationMode m_encapMode;
 
   /**
    * \internal
@@ -365,14 +413,6 @@ private:
   NetDevice::PromiscReceiveCallback m_promiscRxCallback;
 
   /**
-   * The trace source fired when packets come into the "top" of the device
-   * at the L3/L2 transition, before being queued for transmission.
-   *
-   * \see class CallBackTraceSource
-   */
-  TracedCallback<Ptr<const Packet> > m_macTxTrace;
-
-  /**
    * The trace source fired for packets successfully received by the device
    * immediately before being forwarded up to higher layers (at the L2/L3
    * transition).  This is a promiscuous trace.
@@ -413,46 +453,6 @@ private:
    * \see class CallBackTraceSource
    */
   TracedCallback<Ptr<const Packet> > m_phyRxDropTrace;
-
-  /**
-   * A trace source that emulates a non-promiscuous protocol sniffer connected
-   * to the device.  Unlike your average everyday sniffer, this trace source
-   * will not fire on PACKET_OTHERHOST events.
-   *
-   * On the transmit size, this trace hook will fire after a packet is dequeued
-   * from the device queue for transmission.  In Linux, for example, this would
-   * correspond to the point just before a device hard_start_xmit where
-   * dev_queue_xmit_nit is called to dispatch the packet to the PF_PACKET
-   * ETH_P_ALL handlers.
-   *
-   * On the receive side, this trace hook will fire when a packet is received,
-   * just before the receive callback is executed.  In Linux, for example,
-   * this would correspond to the point at which the packet is dispatched to
-   * packet sniffers in netif_receive_skb.
-   *
-   * \see class CallBackTraceSource
-   */
-  TracedCallback<Ptr<const Packet> > m_snifferTrace;
-
-  /**
-   * A trace source that emulates a promiscuous mode protocol sniffer connected
-   * to the device.  This trace source fire on packets destined for any host
-   * just like your average everyday packet sniffer.
-   *
-   * On the transmit size, this trace hook will fire after a packet is dequeued
-   * from the device queue for transmission.  In Linux, for example, this would
-   * correspond to the point just before a device hard_start_xmit where
-   * dev_queue_xmit_nit is called to dispatch the packet to the PF_PACKET
-   * ETH_P_ALL handlers.
-   *
-   * On the receive side, this trace hook will fire when a packet is received,
-   * just before the receive callback is executed.  In Linux, for example,
-   * this would correspond to the point at which the packet is dispatched to
-   * packet sniffers in netif_receive_skb.
-   *
-   * \see class CallBackTraceSource
-   */
-  TracedCallback<Ptr<const Packet> > m_promiscSnifferTrace;
 
 };
 
