@@ -60,7 +60,7 @@ main (int argc, char *argv[])
   GlobalValue::Bind ("ChecksumEnabled", BooleanValue (true));
 
   uint16_t sinkPort = 8000;
-  uint32_t packetSize = 10000; // bytes
+  uint32_t packetSize = 64; // bytes
   std::string dataRate("1000Mb/s");
 
   NS_LOG_INFO ("Create Node");
