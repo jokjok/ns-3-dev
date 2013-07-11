@@ -88,11 +88,18 @@ public:
   virtual bool SendManyFrom (Ptr<PacketBurst> packets, const Address& source,
                                const Address& dest, uint16_t protocolNumber);
 
+protected:
+  void AddHeader (Ptr<Packet> p,   const Address &source,
+                 const Address &dest,  uint16_t protocolNumber);
+
 
 private:
   // private copy constructor as suggested in:
   // http://www.nsnam.org/wiki/index.php/NS-3_Python_Bindings#.22invalid_use_of_incomplete_type.22
   NetmapNetDevice (NetmapNetDevice const &);
+
+  void DropTrace(Ptr<PacketBurst> packets);
+  void Trace(Ptr<PacketBurst> packets);
 
   /**
    * \internal

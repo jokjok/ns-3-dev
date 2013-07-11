@@ -19,6 +19,8 @@
 #include "netmap-net-device.h"
 #include "netmap-priv-impl.h"
 
+#include "ns3/llc-snap-header.h"
+#include "ns3/ethernet-trailer.h"
 #include "ns3/simulator.h"
 #include "ns3/log.h"
 
@@ -51,13 +53,13 @@ NetmapNetDevice::NetmapNetDevice (NetmapNetDevice const &)
 
 NetmapNetDevice::~NetmapNetDevice ()
 {
+  delete m_d;
 }
 
 void
 NetmapNetDevice::Start (Time tStart)
 {
   NS_LOG_FUNCTION (tStart);
-  std::cout << "START";
   Simulator::Cancel (m_startEvent);
   m_startEvent = Simulator::Schedule (tStart, &NetmapNetDevice::StartDevice, this);
 }
@@ -74,11 +76,16 @@ void
 NetmapNetDevice::StartDevice (void)
 {
   NS_LOG_FUNCTION (this);
-  std::cout << "START";
+
+  if (!m_d->IsSystemNetmapCapable())
+    {
+      NS_FATAL_ERROR("Failure, system isn't netmap-capable");
+      return;
+    }
 
   if (m_ifName.empty())
     {
-      NS_LOG_DEBUG("Failure, invalid ifname.");
+      NS_FATAL_ERROR("Invalid ifname");
     }
   else
     {
@@ -89,14 +96,17 @@ NetmapNetDevice::StartDevice (void)
           if (m_d->StartNmMode())
             m_linkUp = true;
           else
-            return;
+            {
+              NS_LOG_WARN("Can't open NM mode on device.");
+              return;
+            }
 
           // Register first ring. Write the possibility to use more rings
           m_d->RegisterHwRingId(0);
         }
       else
         {
-          NS_LOG_DEBUG("Failure, device isn't netmap compatible");
+          NS_FATAL_ERROR("Failure, device isn't netmap compatible");
         }
     }
 }
@@ -114,10 +124,11 @@ void
 NetmapNetDevice::SetIfName (const std::string& ifName)
 {
   m_ifName = ifName;
+  StartDevice ();
 }
 
 std::string
-NetmapNetDevice::GetIfName( void) const
+NetmapNetDevice::GetIfName (void) const
 {
   return m_ifName;
 }
@@ -126,7 +137,6 @@ bool
 NetmapNetDevice::Send (Ptr<Packet> packet, const Address& destination,
                       uint16_t protocolNumber)
 {
-  std::cout << "SenD";
   NS_LOG_FUNCTION (this << packet << destination << protocolNumber);
   return SendFrom (packet, GetAddress(), destination, protocolNumber);
 }
@@ -135,7 +145,6 @@ bool
 NetmapNetDevice::SendMany (Ptr<PacketBurst> packets, const Address& dest,
                           uint16_t protocolNumber)
 {
-  std::cout << "SenDManya";
   return SendManyFrom (packets, GetAddress(), dest, protocolNumber);
 }
 
@@ -143,64 +152,169 @@ bool
 NetmapNetDevice::SendFrom (Ptr<Packet> packet, const Address& src,
                           const Address& dest, uint16_t protocolNumber)
 {
-  std::cout << "SenDFrom";
   NS_LOG_FUNCTION (this << packet << dest << src << protocolNumber);
 
   PacketBurst b;
+  b.SetPacketsOwner (PacketBurst::USER);
   b.AddPacket (packet);
 
   return SendManyFrom (Ptr<PacketBurst> (&b), src, dest, protocolNumber);
+}
+
+void
+NetmapNetDevice::DropTrace(Ptr<PacketBurst> packets)
+{
+  std::list< Ptr<Packet> >::const_iterator iterator;
+
+  for (iterator = packets->Begin (); iterator != packets->End (); ++iterator) {
+    Ptr<Packet> pkt = *iterator;
+    m_macTxDropTrace (pkt);
+  }
+}
+
+void
+NetmapNetDevice::Trace(Ptr<PacketBurst> packets)
+{
+  std::list< Ptr<Packet> >::const_iterator iterator;
+
+  for (iterator = packets->Begin (); iterator != packets->End (); ++iterator) {
+    Ptr<Packet> pkt = *iterator;
+
+    m_macTxTrace (pkt);
+    m_promiscSnifferTrace (pkt);
+    m_snifferTrace (pkt);
+    NS_LOG_LOGIC(pkt);
+  }
 }
 
 bool
 NetmapNetDevice::SendManyFrom (Ptr<PacketBurst> packets, const Address& src,
                               const Address& dest, uint16_t protocolNumber)
 {
-  std::cout << "SenDManyFrom";
-  NS_LOG_FUNCTION (this << packets << src << dest << protocolNumber);
+  NS_LOG_FUNCTION (this << src << dest << protocolNumber);
+  std::list< Ptr<Packet> >::const_iterator iterator;
 
   if (IsLinkUp () == false)
     {
-      std::list< Ptr<Packet> >::const_iterator iterator;
-
-      for (iterator = packets->Begin(); iterator != packets->End(); ++iterator) {
-        Ptr<Packet> pkt = *iterator;
-        m_macTxDropTrace (pkt);
-      }
-
+      DropTrace (packets);
+      NS_LOG_LOGIC ("Link down");
       return false;
     }
 
-  EthernetHeader header (false);
-  Mac48Address destination = Mac48Address::ConvertFrom (dest);
-  Mac48Address source = Mac48Address::ConvertFrom (src);
+  NS_LOG_LOGIC ("Transmit packets from " << src);
+  NS_LOG_LOGIC ("Transmit packets to " << dest);
 
-  NS_LOG_LOGIC ("Transmit packets from " << source);
-  NS_LOG_LOGIC ("Transmit packets to " << destination);
-
-  header.SetSource (source);
-  header.SetDestination (destination);
-
-  header.SetLengthType (protocolNumber);
-
-  //
-  // there's not much meaning associated with the different layers in this
-  // device, so don't be surprised when they're all stacked together in
-  // essentially one place.  We do this for trace consistency across devices.
-  //
-  //m_macTxTrace (packet);
-  //m_promiscSnifferTrace (packet);
-  //m_snifferTrace (packet);
-
-  NS_LOG_LOGIC ("Calling Netmap API");
-
-  if ( ! m_d->Send (packets, header) )
+  for (iterator = packets->Begin (); iterator != packets->End (); ++iterator)
     {
-      //m_macTxDropTrace (packet);
+      Ptr<Packet> pkt = *iterator;
+      AddHeader (pkt, src, dest, protocolNumber);
+    }
+
+  NS_LOG_LOGIC ("Calling Netmap API for these packets");
+  Trace (packets);
+
+  if ( ! m_d->Send (packets) )
+    {
+      DropTrace (packets);
       return false;
     }
 
   return true;
+}
+
+void
+NetmapNetDevice::AddHeader (Ptr<Packet> p,   const Address &src,
+                            const Address &dest,  uint16_t protocolNumber)
+{
+  NS_LOG_FUNCTION (p << src << dest << protocolNumber);
+
+  Mac48Address destination = Mac48Address::ConvertFrom (dest);
+  Mac48Address source = Mac48Address::ConvertFrom (src);
+
+  EthernetHeader header (false);
+  header.SetSource (source);
+  header.SetDestination (destination);
+
+  EthernetTrailer trailer;
+
+  NS_LOG_LOGIC ("p->GetSize () = " << p->GetSize ());
+  NS_LOG_LOGIC ("m_encapMode = " << m_encapMode);
+  NS_LOG_LOGIC ("m_mtu = " << m_mtu);
+
+  uint16_t lengthType = 0;
+  switch (m_encapMode)
+    {
+    case DIX:
+      NS_LOG_LOGIC ("Encapsulating packet as DIX (type interpretation)");
+      //
+      // This corresponds to the type interpretation of the lengthType field as
+      // in the old Ethernet Blue Book.
+      //
+      lengthType = protocolNumber;
+
+      //
+      // All Ethernet frames must carry a minimum payload of 46 bytes.  We need
+      // to pad out if we don't have enough bytes.  These must be real bytes
+      // since they will be written to pcap files and compared in regression
+      // trace files.
+      //
+      if (p->GetSize () < 46)
+        {
+          uint8_t buffer[46];
+          memset (buffer, 0, 46);
+          Ptr<Packet> padd = Create<Packet> (buffer, 46 - p->GetSize ());
+          p->AddAtEnd (padd);
+        }
+      break;
+    case LLC:
+      {
+        NS_LOG_LOGIC ("Encapsulating packet as LLC (length interpretation)");
+
+        LlcSnapHeader llc;
+        llc.SetType (protocolNumber);
+        p->AddHeader (llc);
+
+        //
+        // This corresponds to the length interpretation of the lengthType
+        // field but with an LLC/SNAP header added to the payload as in
+        // IEEE 802.2
+        //
+        lengthType = p->GetSize ();
+
+        //
+        // All Ethernet frames must carry a minimum payload of 46 bytes.  The
+        // LLC SNAP header counts as part of this payload.  We need to padd out
+        // if we don't have enough bytes.  These must be real bytes since they
+        // will be written to pcap files and compared in regression trace files.
+        //
+        if (p->GetSize () < 46)
+          {
+            uint8_t buffer[46];
+            memset (buffer, 0, 46);
+            Ptr<Packet> padd = Create<Packet> (buffer, 46 - p->GetSize ());
+            p->AddAtEnd (padd);
+          }
+
+        NS_ASSERT_MSG (p->GetSize () <= GetMtu (),
+                       "CsmaNetDevice::AddHeader(): 802.3 Length/Type field with LLC/SNAP: "
+                       "length interpretation must not exceed device frame size minus overhead");
+      }
+      break;
+    default:
+      NS_FATAL_ERROR ("NetmapNetDevice::AddHeader(): Unknown packet encapsulation mode");
+      break;
+    }
+
+  NS_LOG_LOGIC ("header.SetLengthType (" << lengthType << ")");
+  header.SetLengthType (lengthType);
+  p->AddHeader (header);
+
+  if (Node::ChecksumEnabled ())
+    {
+      trailer.EnableFcs (true);
+    }
+  trailer.CalcFcs (p);
+  p->AddTrailer (trailer);
 }
 
 }

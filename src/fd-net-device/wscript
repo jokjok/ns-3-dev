@@ -124,6 +124,7 @@ def build(bld):
         'model/netmap_user.h',
         'model/fd-net-device.h',
         'helper/fd-net-device-helper.h',
+	'helper/netmap-net-device-helper.h',
         ]
 
     if bld.env['ENABLE_TAP']:

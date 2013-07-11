@@ -78,12 +78,12 @@ bool NetmapPrivImpl::CloseFd()
   return true;
 }
 
+#include <errno.h>
 
 bool
 NetmapPrivImpl::StartNmMode()
 {
   struct nmreq nmr;
-  memset (&nmr, sizeof(nmr), 0);
 
   if (m_ifName.empty ())
     {
@@ -99,12 +99,16 @@ NetmapPrivImpl::StartNmMode()
    * We decide to put the first interface registration here to
    * give time to cards that take a long time to reset the PHY.
    */
+
+  memset (&nmr, sizeof (nmr), 0);
   nmr.nr_version = NETMAP_API;
+  nmr.nr_ringid = 1;
   strncpy (nmr.nr_name, m_ifName.c_str (), m_ifName.length () + 1);
 
   if (ioctl (m_fd, NIOCREGIF, &nmr) == -1)
     {
           NS_LOG_WARN ("Unable to register interface in netmap mode");
+          NS_LOG_WARN (errno);
           m_mmapMem = 0;
           return false;
     }
@@ -121,7 +125,7 @@ NetmapPrivImpl::StartNmMode()
   m_nifp = NETMAP_IF(m_mmapMem, nmr.nr_offset);
 
   m_begin = 0;
-  m_end = GetRxRingsNumber (); // XXX max of rx or tx
+  m_end = GetTxRingsNumber (); // XXX max of rx or tx
   m_tx = NETMAP_TXRING (m_nifp, 0);
   m_rx = NETMAP_RXRING (m_nifp, 0);
 
@@ -196,8 +200,8 @@ NetmapPrivImpl::getFlags ()
   return ifr.ifr_flags;
 }
 
-bool
-NetmapPrivImpl::Send (Ptr<PacketBurst> packets, const EthernetHeader &header)
+uint32_t
+NetmapPrivImpl::Send (Ptr<PacketBurst> packets)
 {
   uint32_t sent = 0;
   uint32_t i;
@@ -213,6 +217,7 @@ NetmapPrivImpl::Send (Ptr<PacketBurst> packets, const EthernetHeader &header)
   fds[0].events = (POLLOUT);
 
   iterator = packets->Begin();
+
   while (sent < packets->GetNPackets())
     {
       /*
@@ -251,7 +256,8 @@ NetmapPrivImpl::Send (Ptr<PacketBurst> packets, const EthernetHeader &header)
               struct netmap_slot *slot = &txring->slot[cur];
               p = NETMAP_BUF(txring, slot->buf_idx);
               pkt = *iterator;
-              pkt->AddHeader (header);
+              ++iterator;
+
               pkt->CopyData((uint8_t*) p, pkt->GetSize());
 
               slot->len = pkt->GetSize();
@@ -283,7 +289,7 @@ NetmapPrivImpl::Send (Ptr<PacketBurst> packets, const EthernetHeader &header)
         }
     }
 
-  return true;
+  return sent;
 }
 
 
@@ -366,14 +372,6 @@ NetmapPrivImpl::UpdateInfos ()
               ResetInfos ();
               return;
             }
-        }
-
-      memset (&nmr, sizeof(nmr), 0);
-      nmr.nr_version = NETMAP_API;
-
-      if ((ioctl (m_fd, NIOCGINFO, &nmr)) == -1)
-        {
-          NS_LOG_WARN ("Unable to get if info without name");
         }
 
       memset (&nmr, sizeof(nmr), 0);

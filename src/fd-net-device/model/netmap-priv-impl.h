@@ -87,7 +87,7 @@ public:
   bool setFlags (short flags);
   short getFlags ();
 
-  bool Send (Ptr<PacketBurst> packets, const EthernetHeader& header);
+  uint32_t Send (Ptr<PacketBurst> packets);
 
   uint16_t GetTxRingsNumber ();
   uint16_t GetRxRingsNumber ();
@@ -119,7 +119,7 @@ private:
 
   struct netmap_if *m_nifp;
 
-  uint32_t m_begin, m_end;               /* first..last+1 rings to check */
+  uint32_t m_begin, m_end;            /* first..last+1 rings to check */
   struct netmap_ring *m_tx, *m_rx;    /* shortcuts */
 };
 
