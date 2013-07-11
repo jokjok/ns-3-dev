@@ -1,16 +1,17 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 
 #include "ns3/core-module.h"
-#include "ns3/netmap-priv-impl.h"
 #include "ns3/internet-module.h"
 #include "ns3/applications-module.h"
+
+#include "../model/netmap-priv-impl.h"
 
 #include "iostream"
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE ("NetmapDeviceGetInfos");
 
-int 
+int
 main (int argc, char *argv[])
 {
   std::string deviceName ("eth1");
