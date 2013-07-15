@@ -28,12 +28,76 @@
 #include <string.h>
 #include <unistd.h>
 #include <poll.h>
+#include <errno.h>
 
 #include "ns3/log.h"
 
 namespace ns3 {
 
 NS_LOG_COMPONENT_DEFINE("NetmapPrivImpl");
+
+void NetmapPrivImpl::DoRead()
+{
+  struct pollfd fds[1];
+  struct netmap_ring *rx_ring;
+  uint32_t i, cur, received = 0;
+  uint16_t rx, limit, id_b, id_e;
+  uint8_t *buf;
+
+  /* setup poll(2) mechanism. */
+  memset (fds, 0, sizeof (fds));
+  fds[0].fd = m_fd;
+  fds[0].events = (POLLIN);
+
+  while (1)
+    {
+      if (poll(fds, 1, 1 * 1000) <= 0)
+        {
+          continue;
+        }
+
+      for (i = m_begin; i < m_end; ++i)
+        {
+          rx_ring = NETMAP_RXRING (m_nifp, i);
+
+          if (rx_ring->avail == 0)
+            continue;
+
+          // XXX: Should I lock? Because bit could change.
+          id_b = m_readBuffer_bit->id;
+          id_e = m_readBuffer_eit->id;
+
+          limit = std::max(id_b, id_e) - std::min(id_b, id_e);
+
+          cur = rx_ring->cur;
+
+          if (rx_ring->avail < limit)
+            limit = rx_ring->avail;
+
+          m_readBufferMutex_e.Lock ();
+          for (rx = 0; rx < limit; ++rx)
+            {
+              struct netmap_slot *slot = &rx_ring->slot[cur];
+              buf = (uint8_t*) NETMAP_BUF(rx_ring, slot->buf_idx);
+
+              m_readBuffer_eit->buffer = buf;
+              m_readBuffer_eit->len = slot->len;
+
+              m_readBuffer_eit = m_readBuffer_eit->next;
+
+              cur = NETMAP_RING_NEXT(rx_ring, cur);
+            }
+          m_readBufferMutex_e.Unlock ();
+
+          rx_ring->avail -= rx;
+          rx_ring->cur = cur;
+
+          received += rx;
+        }
+   // tell the card we have read the data
+   //ioctl(fds[0].fd, NIOCRXSYNC, NULL);
+  }
+}
 
 NetmapPrivImpl::NetmapPrivImpl (NetmapNetDevice *q)
   : m_q (q),
@@ -47,6 +111,38 @@ NetmapPrivImpl::NetmapPrivImpl (NetmapNetDevice *q)
     m_mmapMem(0),
     m_fd(-1)
 {
+  m_readBuffer_bit = new NetmapPacketCB;
+  m_readBuffer_bit->id = 0;
+
+  m_readBuffer_eit = m_readBuffer_bit;
+
+  for (uint16_t i=1; i < 1024; ++i)
+    {
+      NetmapPacketCB *pkt = new NetmapPacketCB;
+      pkt->id = i;
+
+      m_readBuffer_eit->next = pkt;
+      m_readBuffer_eit = pkt;
+    }
+
+  m_readBuffer_eit->next = m_readBuffer_bit;
+  m_readBuffer_eit = m_readBuffer_bit;
+
+}
+
+NetmapPrivImpl::~NetmapPrivImpl()
+{
+  m_readBuffer_eit = m_readBuffer_bit->next;
+
+  while (m_readBuffer_eit != m_readBuffer_bit)
+    {
+      NetmapPacketCB *temp = m_readBuffer_eit;
+      m_readBuffer_eit = m_readBuffer_eit->next;
+
+      delete temp;
+    }
+
+  delete m_readBuffer_bit;
 }
 
 void
@@ -77,8 +173,6 @@ bool NetmapPrivImpl::CloseFd()
 
   return true;
 }
-
-#include <errno.h>
 
 bool
 NetmapPrivImpl::StartNmMode()

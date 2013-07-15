@@ -24,6 +24,7 @@
 
 #include "ns3/ethernet-header.h"
 #include "ns3/packet-burst.h"
+#include "ns3/system-mutex.h"
 
 struct netmap_if;
 struct netmap_ring;
@@ -31,6 +32,14 @@ struct netmap_ring;
 namespace ns3 {
 
 class NetmapNetDevice;
+
+struct NetmapPacketCB
+{
+  uint8_t *buffer;
+  uint16_t len;
+  uint16_t id;
+  NetmapPacketCB *next;
+};
 
 /**
  * \ingroup netmap-net-device
@@ -72,6 +81,7 @@ public:
   static bool IsSystemNetmapCapable ();
 
   NetmapPrivImpl (NetmapNetDevice *q);
+  ~NetmapPrivImpl ();
 
   void SetIfName (const std::string& ifName);
 
@@ -96,12 +106,19 @@ public:
   uint32_t GetMmapMemSize   ();
 
 protected:
+  void DoRead();
+
   NetmapNetDevice *m_q;
 
 private:
 
   void UpdateInfos();
   void ResetInfos();
+
+  SystemMutex m_readBufferMutex_b;
+  SystemMutex m_readBufferMutex_e;
+  NetmapPacketCB *m_readBuffer_bit;
+  NetmapPacketCB *m_readBuffer_eit;
 
   std::string m_ifName;
   bool m_infosAreValid;
