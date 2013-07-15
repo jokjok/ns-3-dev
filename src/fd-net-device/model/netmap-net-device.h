@@ -83,9 +83,9 @@ public:
                               const Address& dest, uint16_t protocolNumber);
 
   // PacketBurst version
-  virtual bool SendMany     (Ptr<PacketBurst> packets, const Address& dest,
+  virtual uint32_t SendMany     (Ptr<PacketBurst> packets, const Address& dest,
                               uint16_t protocolNumber);
-  virtual bool SendManyFrom (Ptr<PacketBurst> packets, const Address& source,
+  virtual uint32_t SendManyFrom (Ptr<PacketBurst> packets, const Address& source,
                                const Address& dest, uint16_t protocolNumber);
 
 protected:

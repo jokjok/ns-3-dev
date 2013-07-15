@@ -141,7 +141,7 @@ NetmapNetDevice::Send (Ptr<Packet> packet, const Address& destination,
   return SendFrom (packet, GetAddress(), destination, protocolNumber);
 }
 
-bool
+uint32_t
 NetmapNetDevice::SendMany (Ptr<PacketBurst> packets, const Address& dest,
                           uint16_t protocolNumber)
 {
@@ -158,7 +158,10 @@ NetmapNetDevice::SendFrom (Ptr<Packet> packet, const Address& src,
   b.SetPacketsOwner (PacketBurst::USER);
   b.AddPacket (packet);
 
-  return SendManyFrom (Ptr<PacketBurst> (&b), src, dest, protocolNumber);
+  if (SendManyFrom (Ptr<PacketBurst> (&b), src, dest, protocolNumber) == 1)
+    return true;
+
+  return false;
 }
 
 void
@@ -187,12 +190,13 @@ NetmapNetDevice::Trace(Ptr<PacketBurst> packets)
   }
 }
 
-bool
+uint32_t
 NetmapNetDevice::SendManyFrom (Ptr<PacketBurst> packets, const Address& src,
                               const Address& dest, uint16_t protocolNumber)
 {
   NS_LOG_FUNCTION (this << src << dest << protocolNumber);
   std::list< Ptr<Packet> >::const_iterator iterator;
+  uint32_t sent = 0;
 
   if (IsLinkUp () == false)
     {
@@ -210,16 +214,34 @@ NetmapNetDevice::SendManyFrom (Ptr<PacketBurst> packets, const Address& src,
       AddHeader (pkt, src, dest, protocolNumber);
     }
 
-  NS_LOG_LOGIC ("Calling Netmap API for these packets");
   Trace (packets);
 
-  if ( ! m_d->Send (packets) )
+  NS_LOG_LOGIC ("Calling Netmap API for these packets");
+
+  sent = m_d->Send (packets);
+
+  iterator = packets->Begin ();
+
+  for (uint32_t i = 0; i < sent; ++i)
     {
-      DropTrace (packets);
-      return false;
+      Ptr<Packet> pkt = *iterator;
+
+      m_macTxTrace (pkt);
+      m_promiscSnifferTrace (pkt);
+      m_snifferTrace (pkt);
+
+      ++iterator;
     }
 
-  return true;
+  for (; iterator != packets->End (); ++iterator)
+    {
+      Ptr<Packet> pkt = *iterator;
+      m_macTxDropTrace (pkt);
+
+      ++iterator;
+    }
+
+  return sent;
 }
 
 void
