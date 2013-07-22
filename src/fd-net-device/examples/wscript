@@ -15,6 +15,8 @@ def build(bld):
     obj.source = 'nm2nm-onoff.cc'
     obj = bld.create_ns3_program('nm-pktgen', ['fd-net-device'])
     obj.source = 'nm-pktgen.cc'
+    obj = bld.create_ns3_program('nm-receiver', ['fd-net-device'])
+    obj.source = 'nm-receiver.cc'
 
     if bld.env["ENABLE_REAL_TIME"]:
         obj = bld.create_ns3_program('realtime-dummy-network', ['fd-net-device', 'internet', 'applications'])
