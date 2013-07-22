@@ -151,14 +151,15 @@ FdNetDevice::GetTypeId (void)
 FdNetDevice::FdNetDevice ()
   : m_startEvent (),
     m_stopEvent (),
+    m_freeBufferInRCallback (true),
     m_mtu (1500), // Defaults to Ethernet v2 MTU
+    m_pendingReadCount (0),
     m_node (0),
     m_ifIndex (0),
     m_fd (-1),
     m_fdReader (0),
     m_isBroadcast (true),
-    m_isMulticast (false),
-    m_pendingReadCount (0)
+    m_isMulticast (false)
 {
   NS_LOG_FUNCTION (this);
   Start (m_tStart);
@@ -356,11 +357,15 @@ FdNetDevice::ForwardUp (uint8_t *buf, ssize_t len)
     }
 
   //
-  // Create a packet out of the buffer we received and free that buffer.
+  // Create a packet out of the buffer we received and free that buffer if
+  // flag m_freeBufferInRCallback is set to true.
   //
   Ptr<Packet> packet = Create<Packet> (reinterpret_cast<const uint8_t *> (buf), len);
-  free (buf);
-  buf = 0;
+  if (m_freeBufferInRCallback)
+    {
+      free (buf);
+      buf = 0;
+    }
 
   //
   // Trace sinks will expect complete packets, not packets without some of the
@@ -481,13 +486,11 @@ FdNetDevice::SendFrom (Ptr<Packet> packet, const Address& src, const Address& de
   NS_LOG_LOGIC ("packet " << packet);
   NS_LOG_LOGIC ("UID is " << packet->GetUid ());
 
-    /*
   if (IsLinkUp () == false)
     {
       m_macTxDropTrace (packet);
       return false;
-    }*/
-
+    }
 
   Mac48Address destination = Mac48Address::ConvertFrom (dest);
   Mac48Address source = Mac48Address::ConvertFrom (src);

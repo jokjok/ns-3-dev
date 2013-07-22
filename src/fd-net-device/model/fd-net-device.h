@@ -188,6 +188,14 @@ protected:
   bool m_linkUp;
 
   /**
+    * \internal
+    *
+    * Flag indicating if the ReceiveCallback method should free the
+    * buffer or not.
+    */
+  bool m_freeBufferInRCallback;
+
+  /**
    * \internal
    *
    * The typ of encapsulation of the received/transmited frames.
@@ -200,6 +208,37 @@ protected:
    * The MTU associated to the file descriptor technology
    */
   uint16_t m_mtu;
+
+  /**
+   * \internal
+   *
+   * Number of packets that were received and scheduled for read but not yeat read.
+   */
+  uint32_t m_pendingReadCount;
+
+  /**
+   * \internal
+   *
+   * Maximum number of packets that can be received and scheduled for read but not yeat read.
+   */
+  uint32_t m_maxPendingReads;
+
+
+  /**
+   * \internal
+   *
+   * Mutex to increase pending read counter.
+   */
+  SystemMutex m_pendingReadMutex;
+
+  /**
+   * \internal
+   *
+   * a copy of the node id so the read thread doesn't have to GetNode() in
+   * in order to find the node ID.  Thread unsafe reference counting in
+   * multithreaded apps is not a good thing.
+   */
+  uint32_t m_nodeId;
 
   /**
    * The trace source fired when packets coming into the "top" of the device
@@ -257,9 +296,80 @@ protected:
    */
   TracedCallback<Ptr<const Packet> > m_promiscSnifferTrace;
 
+  /**
+   * The callback used to notify higher layers that a packet has been received.
+   */
+  NetDevice::ReceiveCallback m_rxCallback;
+
 private:
   // private copy constructor as sugested in:
   // http://www.nsnam.org/wiki/NS-3_Python_Bindings#.22invalid_use_of_incomplete_type.22
+  FdNetDevice (FdNetDevice const &);
+
+  /**
+   * The callback used to notify higher layers that a packet has been received in promiscuous mode.
+   */
+  NetDevice::PromiscReceiveCallback m_promiscRxCallback;
+
+  /**
+   * The trace source fired for packets successfully received by the device
+   * immediately before being forwarded up to higher layers (at the L2/L3
+   * transition).  This is a promiscuous trace.
+   *
+   * \see class CallBackTraceSource
+   */
+  TracedCallback<Ptr<const Packet> > m_macPromiscRxTrace;
+
+  /**
+   * The trace source fired for packets successfully received by the device
+   * immediately before being forwarded up to higher layers (at the L2/L3
+   * transition).  This is a non-promiscuous trace.
+   *
+   * \see class CallBackTraceSource
+   */
+  TracedCallback<Ptr<const Packet> > m_macRxTrace;
+
+  /**
+   * The trace source fired for packets successfully received by the device
+   * but which are dropped before being forwarded up to higher layers (at the
+   * L2/L3 transition).
+   *
+   * \see class CallBackTraceSource
+   */
+  TracedCallback<Ptr<const Packet> > m_macRxDropTrace;
+
+  /**
+   * The trace source fired when the phy layer drops a packet as it tries
+   * to transmit it.
+   *
+   * \see class CallBackTraceSource
+   */
+  TracedCallback<Ptr<const Packet> > m_phyTxDropTrace;
+
+  /**
+   * The trace source fired when the phy layer drops a packet it has received.
+   *
+   * \see class CallBackTraceSource
+   */
+  TracedCallback<Ptr<const Packet> > m_phyRxDropTrace;
+
+  /**
+   * \internal
+   *
+   * Callback to invoke when a new frame is received
+   */
+  virtual void ReceiveCallback (uint8_t *buf, ssize_t len);
+
+  /**
+   * \internal
+   *
+   * Forward the frame to the appropriate callback for processing
+   */
+  virtual void ForwardUp (uint8_t *buf, ssize_t len);
+
+private:
+  // private copy constructor as sugested in:
+  // http://www.nsnam.org/wiki/index.php/NS-3_Python_Bindings#.22invalid_use_of_incomplete_type.22
   FdNetDevice (FdNetDevice const &);
 
   /**
@@ -277,20 +387,6 @@ private:
   void StopDevice (void);
 
   /**
-   * \internal
-   *
-   * Callback to invoke when a new frame is received
-   */
-  void ReceiveCallback (uint8_t *buf, ssize_t len);
-
-  /**
-   * \internal
-   *
-   * Forward the frame to the appropriate callback for processing
-   */
-  void ForwardUp (uint8_t *buf, ssize_t len);
-
-  /**
    * Start Sending a Packet Down the Wire.
    * @param p packet to send
    * @returns true if success, false on failure
@@ -305,15 +401,6 @@ private:
    * The ns-3 node associated to the net device.
    */
   Ptr<Node> m_node;
-
-  /*
-   * \internal
-   *
-   * a copy of the node id so the read thread doesn't have to GetNode() in
-   * in order to find the node ID.  Thread unsafe reference counting in
-   * multithreaded apps is not a good thing.
-   */
-  uint32_t m_nodeId;
 
   /**
    * \internal
@@ -369,28 +456,6 @@ private:
   /**
    * \internal
    *
-   * Number of packets that were received and scheduled for read but not yeat read.
-   */
-  uint32_t m_pendingReadCount;
-
-  /**
-   * \internal
-   *
-   * Maximum number of packets that can be received and scheduled for read but not yeat read.
-   */
-  uint32_t m_maxPendingReads;
-
-
-  /**
-   * \internal
-   *
-   * Mutex to increase pending read counter.
-   */
-  SystemMutex m_pendingReadMutex;
-
-  /**
-   * \internal
-   *
    * Time to start spinning up the device
    */
   Time m_tStart;
@@ -401,59 +466,6 @@ private:
    * Time to start tearing down the device
    */
   Time m_tStop;
-
-  /**
-   * The callback used to notify higher layers that a packet has been received.
-   */
-  NetDevice::ReceiveCallback m_rxCallback;
-
-  /**
-   * The callback used to notify higher layers that a packet has been received in promiscuous mode.
-   */
-  NetDevice::PromiscReceiveCallback m_promiscRxCallback;
-
-  /**
-   * The trace source fired for packets successfully received by the device
-   * immediately before being forwarded up to higher layers (at the L2/L3
-   * transition).  This is a promiscuous trace.
-   *
-   * \see class CallBackTraceSource
-   */
-  TracedCallback<Ptr<const Packet> > m_macPromiscRxTrace;
-
-  /**
-   * The trace source fired for packets successfully received by the device
-   * immediately before being forwarded up to higher layers (at the L2/L3
-   * transition).  This is a non-promiscuous trace.
-   *
-   * \see class CallBackTraceSource
-   */
-  TracedCallback<Ptr<const Packet> > m_macRxTrace;
-
-  /**
-   * The trace source fired for packets successfully received by the device
-   * but which are dropped before being forwarded up to higher layers (at the
-   * L2/L3 transition).
-   *
-   * \see class CallBackTraceSource
-   */
-  TracedCallback<Ptr<const Packet> > m_macRxDropTrace;
-
-  /**
-   * The trace source fired when the phy layer drops a packet as it tries
-   * to transmit it.
-   *
-   * \see class CallBackTraceSource
-   */
-  TracedCallback<Ptr<const Packet> > m_phyTxDropTrace;
-
-  /**
-   * The trace source fired when the phy layer drops a packet it has received.
-   *
-   * \see class CallBackTraceSource
-   */
-  TracedCallback<Ptr<const Packet> > m_phyRxDropTrace;
-
 };
 
 } // namespace ns3
