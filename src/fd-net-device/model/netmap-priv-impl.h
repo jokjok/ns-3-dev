@@ -25,6 +25,8 @@
 #include "ns3/ethernet-header.h"
 #include "ns3/packet-burst.h"
 #include "ns3/system-mutex.h"
+#include "ns3/system-thread.h"
+#include "ns3/system-condition.h"
 
 struct netmap_if;
 struct netmap_ring;
@@ -52,6 +54,7 @@ struct NetmapPacketCB
 class NetmapPrivImpl
 {
 public:
+  static const int BUFFER_LENGTH = 1024;
   /**
    * Check if the given device is netmap capable
    *
@@ -106,7 +109,8 @@ public:
   uint32_t GetMmapMemSize   ();
 
 protected:
-  void DoRead();
+  void DoRead ();
+  void Consume ();
 
   NetmapNetDevice *m_q;
 
@@ -115,10 +119,15 @@ private:
   void UpdateInfos();
   void ResetInfos();
 
-  SystemMutex m_readBufferMutex_b;
-  SystemMutex m_readBufferMutex_e;
   NetmapPacketCB *m_readBuffer_bit;
   NetmapPacketCB *m_readBuffer_eit;
+
+  Ptr<SystemThread> m_readThread;
+  Ptr<SystemThread> m_consumerThread;
+  bool m_readThreadRun;
+  bool m_consumerThreadRun;
+
+  SystemCondition m_consumerCond;
 
   std::string m_ifName;
   bool m_infosAreValid;
@@ -138,6 +147,12 @@ private:
 
   uint32_t m_begin, m_end;            /* first..last+1 rings to check */
   struct netmap_ring *m_tx, *m_rx;    /* shortcuts */
+
+
+  // TEST
+
+  uint64_t m_received;
+  uint64_t m_processed;
 };
 
 }

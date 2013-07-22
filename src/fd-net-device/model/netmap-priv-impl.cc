@@ -34,13 +34,13 @@
 
 namespace ns3 {
 
-NS_LOG_COMPONENT_DEFINE("NetmapPrivImpl");
+NS_LOG_COMPONENT_DEFINE ("NetmapPrivImpl");
 
-void NetmapPrivImpl::DoRead()
+void NetmapPrivImpl::DoRead ()
 {
   struct pollfd fds[1];
   struct netmap_ring *rx_ring;
-  uint32_t i, cur, received = 0;
+  uint32_t i, cur;
   uint16_t rx, limit, id_b, id_e;
   uint8_t *buf;
 
@@ -49,9 +49,9 @@ void NetmapPrivImpl::DoRead()
   fds[0].fd = m_fd;
   fds[0].events = (POLLIN);
 
-  while (1)
+  while (m_readThreadRun)
     {
-      if (poll(fds, 1, 1 * 1000) <= 0)
+      if (poll (fds, 1, 1 * 1000) <= 0)
         {
           continue;
         }
@@ -63,40 +63,73 @@ void NetmapPrivImpl::DoRead()
           if (rx_ring->avail == 0)
             continue;
 
-          // XXX: Should I lock? Because bit could change.
           id_b = m_readBuffer_bit->id;
           id_e = m_readBuffer_eit->id;
 
-          limit = std::max(id_b, id_e) - std::min(id_b, id_e);
+          if (id_b == id_e)
+            limit = BUFFER_LENGTH / 2; // TODO: 2 = m_end-m_begin+1
+          else if (id_e > id_b)
+            limit = BUFFER_LENGTH - (id_e - id_b);
+          else
+            limit = id_b - id_e;
 
           cur = rx_ring->cur;
 
           if (rx_ring->avail < limit)
             limit = rx_ring->avail;
 
-          m_readBufferMutex_e.Lock ();
           for (rx = 0; rx < limit; ++rx)
             {
               struct netmap_slot *slot = &rx_ring->slot[cur];
-              buf = (uint8_t*) NETMAP_BUF(rx_ring, slot->buf_idx);
+              buf = (uint8_t*) NETMAP_BUF (rx_ring, slot->buf_idx);
 
               m_readBuffer_eit->buffer = buf;
               m_readBuffer_eit->len = slot->len;
 
               m_readBuffer_eit = m_readBuffer_eit->next;
 
-              cur = NETMAP_RING_NEXT(rx_ring, cur);
+              cur = NETMAP_RING_NEXT (rx_ring, cur);
             }
-          m_readBufferMutex_e.Unlock ();
 
           rx_ring->avail -= rx;
           rx_ring->cur = cur;
 
-          received += rx;
+          m_received += rx;
         }
-   // tell the card we have read the data
-   //ioctl(fds[0].fd, NIOCRXSYNC, NULL);
-  }
+
+      if (m_readBuffer_bit != m_readBuffer_eit)
+        {
+          m_consumerCond.SetCondition (true);
+          m_consumerCond.Broadcast ();
+        }
+
+      // tell the card we have read the data
+      ioctl (fds[0].fd, NIOCRXSYNC, NULL);
+    }
+
+  m_readThreadRun = false;
+}
+
+void
+NetmapPrivImpl::Consume ()
+{
+  NetmapPacketCB *end;
+
+  while (m_consumerThreadRun)
+    {
+      m_consumerCond.Wait ();
+      m_consumerCond.SetCondition (false);
+
+      end = m_readBuffer_eit;
+
+      while (m_readBuffer_bit != end)
+        {
+          m_q->ReceiveCallback (m_readBuffer_bit->buffer, m_readBuffer_bit->len);
+          m_readBuffer_bit = m_readBuffer_bit->next;
+          ++m_processed;
+        }
+
+    }
 }
 
 NetmapPrivImpl::NetmapPrivImpl (NetmapNetDevice *q)
@@ -111,12 +144,15 @@ NetmapPrivImpl::NetmapPrivImpl (NetmapNetDevice *q)
     m_mmapMem(0),
     m_fd(-1)
 {
+  m_received = 0;
+  m_processed = 0;
+
   m_readBuffer_bit = new NetmapPacketCB;
   m_readBuffer_bit->id = 0;
 
   m_readBuffer_eit = m_readBuffer_bit;
 
-  for (uint16_t i=1; i < 1024; ++i)
+  for (uint16_t i=1; i < BUFFER_LENGTH; ++i)
     {
       NetmapPacketCB *pkt = new NetmapPacketCB;
       pkt->id = i;
@@ -127,11 +163,19 @@ NetmapPrivImpl::NetmapPrivImpl (NetmapNetDevice *q)
 
   m_readBuffer_eit->next = m_readBuffer_bit;
   m_readBuffer_eit = m_readBuffer_bit;
-
 }
 
 NetmapPrivImpl::~NetmapPrivImpl()
 {
+  m_readThreadRun = false;
+
+  m_consumerThreadRun = false;
+  m_consumerCond.SetCondition (true);
+  m_consumerCond.Broadcast ();
+
+  m_readThread->Join ();
+  m_consumerThread->Join ();
+
   m_readBuffer_eit = m_readBuffer_bit->next;
 
   while (m_readBuffer_eit != m_readBuffer_bit)
@@ -143,6 +187,8 @@ NetmapPrivImpl::~NetmapPrivImpl()
     }
 
   delete m_readBuffer_bit;
+
+  std::cout << "received=" << m_received << " processed= " << m_processed << std::endl;
 }
 
 void
@@ -152,7 +198,7 @@ NetmapPrivImpl::SetIfName (const std::string &ifName)
   m_ifName = ifName;
 }
 
-bool NetmapPrivImpl::OpenFd()
+bool NetmapPrivImpl::OpenFd ()
 {
   if (m_fd != -1)
     CloseFd ();
@@ -167,15 +213,15 @@ bool NetmapPrivImpl::OpenFd()
   return true;
 }
 
-bool NetmapPrivImpl::CloseFd()
+bool NetmapPrivImpl::CloseFd ()
 {
-  close(m_fd);
+  close (m_fd);
 
   return true;
 }
 
 bool
-NetmapPrivImpl::StartNmMode()
+NetmapPrivImpl::StartNmMode ()
 {
   struct nmreq nmr;
 
@@ -216,7 +262,7 @@ NetmapPrivImpl::StartNmMode()
       return false;
     }
 
-  m_nifp = NETMAP_IF(m_mmapMem, nmr.nr_offset);
+  m_nifp = NETMAP_IF (m_mmapMem, nmr.nr_offset);
 
   m_begin = 0;
   m_end = GetTxRingsNumber (); // XXX max of rx or tx
@@ -234,6 +280,15 @@ NetmapPrivImpl::StartNmMode()
           return false;
         }
     }
+
+  m_readThreadRun = true;
+  m_readThread = Create<SystemThread> ( MakeCallback (&NetmapPrivImpl::DoRead, this));
+  m_readThread->Start ();
+
+  m_consumerThreadRun = true;
+  m_consumerCond.SetCondition(false);
+  m_consumerThread = Create<SystemThread> ( MakeCallback (&NetmapPrivImpl::Consume, this));
+  m_consumerThread->Start ();
 
   return true;
 }
@@ -306,18 +361,18 @@ NetmapPrivImpl::Send (Ptr<PacketBurst> packets)
   struct netmap_ring *txring;
 
   /* setup poll(2) mechanism. */
-  memset(fds, 0, sizeof(fds));
+  memset(fds, 0, sizeof (fds));
   fds[0].fd = m_fd;
   fds[0].events = (POLLOUT);
 
-  iterator = packets->Begin();
+  iterator = packets->Begin ();
 
-  while (sent < packets->GetNPackets())
+  while (sent < packets->GetNPackets ())
     {
       /*
-       * wait for available room in the send queue(s)
+       * wait for available room in the send queue (s)
        */
-      if (poll(fds, 1, 2000) <= 0)
+      if (poll (fds, 1, 2000) <= 0)
         {
           return false;
         }
@@ -332,8 +387,8 @@ NetmapPrivImpl::Send (Ptr<PacketBurst> packets)
           uint32_t enqueued;
           uint32_t cur;
 
-          if (packets->GetNPackets() > 0 && packets->GetNPackets() - sent < limit)
-            limit = packets->GetNPackets() - sent;
+          if (packets->GetNPackets () > 0 && packets->GetNPackets () - sent < limit)
+            limit = packets->GetNPackets () - sent;
 
           txring = NETMAP_TXRING(m_nifp, i);
 
@@ -348,18 +403,18 @@ NetmapPrivImpl::Send (Ptr<PacketBurst> packets)
           for (enqueued = 0; enqueued < limit; ++enqueued)
             {
               struct netmap_slot *slot = &txring->slot[cur];
-              p = NETMAP_BUF(txring, slot->buf_idx);
+              p = NETMAP_BUF (txring, slot->buf_idx);
               pkt = *iterator;
               ++iterator;
 
-              pkt->CopyData((uint8_t*) p, pkt->GetSize());
+              pkt->CopyData ((uint8_t*) p, pkt->GetSize ());
 
-              slot->len = pkt->GetSize();
+              slot->len = pkt->GetSize ();
 
               if (enqueued == limit - 1)
                 slot->flags |= NS_REPORT;
 
-              cur = NETMAP_RING_NEXT(txring, cur);
+              cur = NETMAP_RING_NEXT (txring, cur);
             }
 
           txring->avail -= enqueued;
@@ -370,16 +425,16 @@ NetmapPrivImpl::Send (Ptr<PacketBurst> packets)
     }
 
   /* flush any remaining packets */
-  ioctl(fds[0].fd, NIOCTXSYNC, NULL);
+  ioctl (fds[0].fd, NIOCTXSYNC, NULL);
 
   /* final part: wait all the TX queues to be empty. */
   for (i = m_begin; i < m_end; i++)
     {
       txring = NETMAP_TXRING(m_nifp, i);
-      while (!NETMAP_TX_RING_EMPTY(txring))
+      while (! NETMAP_TX_RING_EMPTY (txring))
         {
-          ioctl(fds[0].fd, NIOCTXSYNC, NULL);
-          usleep(1); /* wait 1 tick */
+          ioctl (fds[0].fd, NIOCTXSYNC, NULL);
+          usleep (1); /* wait 1 tick */
         }
     }
 
@@ -403,27 +458,27 @@ NetmapPrivImpl::RegisterSwRing ()
 {
   m_begin = GetRxRingsNumber ();
   m_end = m_begin + 1;
-  m_tx = NETMAP_TXRING(m_nifp, GetTxRingsNumber ());
-  m_rx = NETMAP_RXRING(m_nifp, GetRxRingsNumber ());
+  m_tx = NETMAP_TXRING (m_nifp, GetTxRingsNumber ());
+  m_rx = NETMAP_RXRING (m_nifp, GetRxRingsNumber ());
 
   return true;
 }
 
 bool
-NetmapPrivImpl::StopNmMode()
+NetmapPrivImpl::StopNmMode ()
 {
-  if (! IsFdOpened())
+  if (! IsFdOpened ())
     return false;
 
   struct nmreq nmr;
-  memset (&nmr, sizeof(nmr), 0);
+  memset (&nmr, sizeof (nmr), 0);
 
   nmr.nr_version = NETMAP_API;
   strncpy (nmr.nr_name, m_ifName.c_str (), m_ifName.length () + 1);
 
-  ioctl(m_fd, NIOCUNREGIF, &nmr);
+  ioctl (m_fd, NIOCUNREGIF, &nmr);
 
-  munmap(m_mmapMem, GetMmapMemSize ());
+  munmap (m_mmapMem, GetMmapMemSize ());
 
   return true;
 }
@@ -468,7 +523,7 @@ NetmapPrivImpl::UpdateInfos ()
             }
         }
 
-      memset (&nmr, sizeof(nmr), 0);
+      memset (&nmr, sizeof (nmr), 0);
       nmr.nr_version = NETMAP_API;
 
       strncpy (nmr.nr_name, m_ifName.c_str (), m_ifName.length () + 1);
@@ -525,7 +580,7 @@ uint32_t NetmapPrivImpl::GetSlotsInRxRing ()
   return m_slotRx;
 }
 
-uint32_t NetmapPrivImpl::GetMmapMemSize()
+uint32_t NetmapPrivImpl::GetMmapMemSize ()
 {
   if (! m_infosAreValid)
     UpdateInfos ();
@@ -540,7 +595,7 @@ NetmapPrivImpl::IsDeviceNetmapCapable (const std::string &ifName)
   int fd;
   bool ret = true;
 
-  memset (&nmr, sizeof(nmr), 0);
+  memset (&nmr, sizeof (nmr), 0);
   nmr.nr_version = NETMAP_API;
 
   fd = open ("/dev/netmap", O_RDWR);
@@ -550,7 +605,7 @@ NetmapPrivImpl::IsDeviceNetmapCapable (const std::string &ifName)
     }
   else
     {
-      memset (&nmr, sizeof(nmr), 0);
+      memset (&nmr, sizeof (nmr), 0);
       nmr.nr_version = NETMAP_API;
       strncpy (nmr.nr_name, ifName.c_str (), ifName.length () + 1);
 
@@ -574,4 +629,4 @@ NetmapPrivImpl::IsSystemNetmapCapable ()
   return ret;
 }
 
-}
+} // namespace ns3
