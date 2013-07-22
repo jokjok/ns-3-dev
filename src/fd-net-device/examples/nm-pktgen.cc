@@ -48,9 +48,6 @@ main (int argc, char *argv[])
   char bufNm[] = "nmpktgen is a we";
   char bufVeth[] = "nmpktgen is a well done packet generator.";
 
-  Ptr<NetDevice> dev;
-
-
   CommandLine cmd;
   cmd.AddValue ("pkt", "packet count", pktcount);
   cmd.AddValue ("mode", "mode", mode);
