@@ -45,6 +45,7 @@ class NetmapPrivImpl;
 class NetmapNetDevice : public FdNetDevice
 {
 public:
+  friend class NetmapPrivImpl;
 
   static TypeId GetTypeId();
 
@@ -68,7 +69,7 @@ public:
   /**
    * Get the interface name associated to this NetmapNedDevice
    *
-   * @return Interface name opened in netmap mode
+   * \return Interface name opened in netmap mode
    */
   std::string GetIfName (void) const;
 
@@ -78,19 +79,19 @@ public:
 
   // From NetDevice
   virtual bool Send         (Ptr<Packet> packet, const Address& destination,
-                              uint16_t protocolNumber);
+                             uint16_t protocolNumber);
   virtual bool SendFrom     (Ptr<Packet> packet, const Address& source,
-                              const Address& dest, uint16_t protocolNumber);
+                             const Address& dest, uint16_t protocolNumber);
 
   // PacketBurst version
   virtual uint32_t SendMany     (Ptr<PacketBurst> packets, const Address& dest,
-                              uint16_t protocolNumber);
+                                 uint16_t protocolNumber);
   virtual uint32_t SendManyFrom (Ptr<PacketBurst> packets, const Address& source,
-                               const Address& dest, uint16_t protocolNumber);
+                                 const Address& dest, uint16_t protocolNumber);
 
 protected:
-  void AddHeader (Ptr<Packet> p,   const Address &source,
-                 const Address &dest,  uint16_t protocolNumber);
+  void AddHeader (Ptr<Packet> p,        const Address &source,
+                  const Address &dest,  uint16_t protocolNumber);
 
 
 private:
@@ -98,8 +99,8 @@ private:
   // http://www.nsnam.org/wiki/index.php/NS-3_Python_Bindings#.22invalid_use_of_incomplete_type.22
   NetmapNetDevice (NetmapNetDevice const &);
 
-  void DropTrace(Ptr<PacketBurst> packets);
-  void Trace(Ptr<PacketBurst> packets);
+  void DropTrace (Ptr<PacketBurst> packets);
+  void Trace (Ptr<PacketBurst> packets);
 
   /**
    * \internal
@@ -115,8 +116,18 @@ private:
    */
   void StopDevice (void);
 
+  /**
+   * \internal
+   *
+   * Name of the device
+   */
   std::string m_ifName;
 
+  /**
+   * \internal
+   *
+   * Implementation private pointer
+   */
   NetmapPrivImpl *m_d;
 
 };

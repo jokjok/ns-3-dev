@@ -45,6 +45,7 @@ NetmapNetDevice::NetmapNetDevice ()
     m_ifName (""),
     m_d (new NetmapPrivImpl (this))
 {
+  m_freeBufferInRCallback = false;
 }
 
 NetmapNetDevice::NetmapNetDevice (NetmapNetDevice const &)
@@ -77,23 +78,23 @@ NetmapNetDevice::StartDevice (void)
 {
   NS_LOG_FUNCTION (this);
 
-  if (!m_d->IsSystemNetmapCapable())
+  if (!m_d->IsSystemNetmapCapable ())
     {
-      NS_FATAL_ERROR("Failure, system isn't netmap-capable");
+      NS_FATAL_ERROR ("Failure, system isn't netmap-capable");
       return;
     }
 
-  if (m_ifName.empty())
+  if (m_ifName.empty ())
     {
-      NS_FATAL_ERROR("Invalid ifname");
+      NS_FATAL_ERROR ("Invalid ifname");
     }
   else
     {
-      if (m_d->IsDeviceNetmapCapable(m_ifName))
+      if (m_d->IsDeviceNetmapCapable (m_ifName))
         {
-          m_d->SetIfName(m_ifName);
-          m_d->OpenFd();
-          if (m_d->StartNmMode())
+          m_d->SetIfName (m_ifName);
+          m_d->OpenFd ();
+          if (m_d->StartNmMode ())
             m_linkUp = true;
           else
             {
@@ -102,7 +103,7 @@ NetmapNetDevice::StartDevice (void)
             }
 
           // Register first ring. Write the possibility to use more rings
-          m_d->RegisterHwRingId(0);
+          m_d->RegisterHwRingId (0);
         }
       else
         {
@@ -116,8 +117,8 @@ NetmapNetDevice::StopDevice (void)
 {
   NS_LOG_FUNCTION (this);
 
-  m_d->StopNmMode();
-  m_d->CloseFd();
+  m_d->StopNmMode ();
+  m_d->CloseFd ();
 }
 
 void
@@ -138,14 +139,15 @@ NetmapNetDevice::Send (Ptr<Packet> packet, const Address& destination,
                       uint16_t protocolNumber)
 {
   NS_LOG_FUNCTION (this << packet << destination << protocolNumber);
-  return SendFrom (packet, GetAddress(), destination, protocolNumber);
+  return SendFrom (packet, GetAddress (), destination, protocolNumber);
 }
 
 uint32_t
 NetmapNetDevice::SendMany (Ptr<PacketBurst> packets, const Address& dest,
                           uint16_t protocolNumber)
 {
-  return SendManyFrom (packets, GetAddress(), dest, protocolNumber);
+  NS_LOG_FUNCTION (this << packets << dest << protocolNumber);
+  return SendManyFrom (packets, GetAddress (), dest, protocolNumber);
 }
 
 bool
@@ -165,29 +167,31 @@ NetmapNetDevice::SendFrom (Ptr<Packet> packet, const Address& src,
 }
 
 void
-NetmapNetDevice::DropTrace(Ptr<PacketBurst> packets)
+NetmapNetDevice::DropTrace (Ptr<PacketBurst> packets)
 {
   std::list< Ptr<Packet> >::const_iterator iterator;
 
-  for (iterator = packets->Begin (); iterator != packets->End (); ++iterator) {
-    Ptr<Packet> pkt = *iterator;
-    m_macTxDropTrace (pkt);
-  }
+  for (iterator = packets->Begin (); iterator != packets->End (); ++iterator)
+    {
+      Ptr<Packet> pkt = *iterator;
+      m_macTxDropTrace (pkt);
+    }
 }
 
 void
-NetmapNetDevice::Trace(Ptr<PacketBurst> packets)
+NetmapNetDevice::Trace (Ptr<PacketBurst> packets)
 {
   std::list< Ptr<Packet> >::const_iterator iterator;
 
-  for (iterator = packets->Begin (); iterator != packets->End (); ++iterator) {
-    Ptr<Packet> pkt = *iterator;
+  for (iterator = packets->Begin (); iterator != packets->End (); ++iterator)
+    {
+      Ptr<Packet> pkt = *iterator;
 
-    m_macTxTrace (pkt);
-    m_promiscSnifferTrace (pkt);
-    m_snifferTrace (pkt);
-    NS_LOG_LOGIC(pkt);
-  }
+      m_macTxTrace (pkt);
+      m_promiscSnifferTrace (pkt);
+      m_snifferTrace (pkt);
+      NS_LOG_LOGIC(pkt);
+    }
 }
 
 uint32_t
@@ -339,5 +343,5 @@ NetmapNetDevice::AddHeader (Ptr<Packet> p,   const Address &src,
   p->AddTrailer (trailer);
 }
 
-}
+} // namespace ns3
 
