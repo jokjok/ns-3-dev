@@ -47,16 +47,20 @@ struct NetmapPacketCB
  * \ingroup netmap-net-device
  * \internal
  *
- * \brief The implementation (private) class
+ * \brief The implementation (private) class.
  *
+ * Here will be many low-level details, so be prepared :-)
  *
  */
 class NetmapPrivImpl
 {
 public:
+
+  /* Bounded-buffer length */
   static const int BUFFER_LENGTH = 1024;
+
   /**
-   * Check if the given device is netmap capable
+   * \brief Check if the given device is netmap capable
    *
    * To be netmap capable, a device should have its netmap-ready
    * kernel module loaded. Actually, only the following list of
@@ -72,7 +76,7 @@ public:
   static bool IsDeviceNetmapCapable (const std::string& ifName);
 
   /**
-   * Check if the system supports Netmap
+   * \brief Check if the system supports Netmap
    *
    * A system is Netmap capable if the netmap kernel module
    * is currently loaded and running. Actually, the kernel module
@@ -83,9 +87,20 @@ public:
    */
   static bool IsSystemNetmapCapable ();
 
+  /**
+   * \brief Constructor
+   *
+   * \param Class which invokes the constructor
+   */
   NetmapPrivImpl (NetmapNetDevice *q);
+
+  /**
+    * \brief Deconstructor
+    *
+    */
   ~NetmapPrivImpl ();
 
+  // From here, documentation is in .cc
   void SetIfName (const std::string& ifName);
 
   bool OpenFd();

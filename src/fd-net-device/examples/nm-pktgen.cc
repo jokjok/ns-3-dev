@@ -139,14 +139,16 @@ main (int argc, char *argv[])
           exit(1);
         }
 
-     d->SetFileDescriptor(sk);
-     d->SetEncapsulationMode(FdNetDevice::LLC);
+      d->SetFileDescriptor(sk);
+      d->SetEncapsulationMode(FdNetDevice::LLC);
 
-     for (it = pkts.begin(); it != pkts.end(); ++it)
-       {
-         d->SendFrom(*it, Mac48Address("b6:b3:95:e9:46:6a"),
-                     Mac48Address("ff:ff:ff:ff:ff:ff"), 0);
-       }
+      for (it = pkts.begin(); it != pkts.end(); ++it)
+        {
+          d->SendFrom(*it, Mac48Address("b6:b3:95:e9:46:6a"),
+                      Mac48Address("ff:ff:ff:ff:ff:ff"), 0);
+        }
+
+      free(if_idx);
     }
 
 }

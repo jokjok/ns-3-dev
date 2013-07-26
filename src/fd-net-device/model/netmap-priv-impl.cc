@@ -132,6 +132,15 @@ NetmapPrivImpl::Consume ()
     }
 }
 
+/**
+ * \brief Constructor
+ *
+ * The constructor initialize only the bounded buffer for the
+ * receiver. To effectively start the netmap mode, see StartNmMode.
+ *
+ * \see StartNmMode
+ * \param q NetmapNetDevice from which is called
+ */
 NetmapPrivImpl::NetmapPrivImpl (NetmapNetDevice *q)
   : m_q (q),
     m_ifName (""),
@@ -165,6 +174,13 @@ NetmapPrivImpl::NetmapPrivImpl (NetmapNetDevice *q)
   m_readBuffer_eit = m_readBuffer_bit;
 }
 
+/**
+ * \brief Deconstructor
+ *
+ * It joins the threads created by StartNmMode, then destroy
+ * the bounded buffer.
+ *
+ */
 NetmapPrivImpl::~NetmapPrivImpl()
 {
   m_readThreadRun = false;
@@ -191,6 +207,14 @@ NetmapPrivImpl::~NetmapPrivImpl()
   std::cout << "received=" << m_received << " processed= " << m_processed << std::endl;
 }
 
+/**
+ * \brief Set the name of the interface to open in Nm mode
+ *
+ * It invalidates previous informations (if gained) about the interface.
+ * You should call StartNmMode after re-setting the interface name.
+ *
+ * \param ifName Interface name
+ */
 void
 NetmapPrivImpl::SetIfName (const std::string &ifName)
 {
@@ -198,6 +222,11 @@ NetmapPrivImpl::SetIfName (const std::string &ifName)
   m_ifName = ifName;
 }
 
+/**
+ * \brief Open the netmap file descriptor
+ *
+ * \return true if the fd was correctly opened
+ */
 bool NetmapPrivImpl::OpenFd ()
 {
   if (m_fd != -1)
@@ -213,11 +242,16 @@ bool NetmapPrivImpl::OpenFd ()
   return true;
 }
 
+/**
+ * \brief Close the netmap file descriptor
+ *
+ * \return true if the fd was correctly closed
+ */
 bool NetmapPrivImpl::CloseFd ()
 {
-  close (m_fd);
+  int r = close (m_fd);
 
-  return true;
+  return (r == 0);
 }
 
 bool
@@ -588,6 +622,12 @@ uint32_t NetmapPrivImpl::GetMmapMemSize ()
   return m_mmapMemSize;
 }
 
+/**
+ * \brief Check if device specified is netmap capable
+ *
+ * \param ifName Interface name
+ * \return true if the device is compatible with netmap
+ */
 bool
 NetmapPrivImpl::IsDeviceNetmapCapable (const std::string &ifName)
 {
@@ -618,6 +658,14 @@ NetmapPrivImpl::IsDeviceNetmapCapable (const std::string &ifName)
   return ret;
 }
 
+/**
+ * \brief Check if the system is netmap capable
+ *
+ * It actually checks the presence of /dev/netmap special
+ * device, created when the netmap module is inserted.
+ *
+ * \return true if the system has the netmap module loaded
+ */
 bool
 NetmapPrivImpl::IsSystemNetmapCapable ()
 {
