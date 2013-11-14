@@ -148,11 +148,28 @@ FdNetDevice::GetTypeId (void)
   return tid;
 }
 
+FdNetDevice::FdNetDevice (int mtu, int maxPendingRead)
+  : m_startEvent (),
+    m_stopEvent (),
+    m_freeBufferInRCallback (true),
+    m_mtu (mtu),
+    m_pendingReadCount (0),
+    m_maxPendingReads (maxPendingRead),
+    m_node (0),
+    m_ifIndex (0),
+    m_fd (-1),
+    m_fdReader (0),
+    m_isBroadcast (true),
+    m_isMulticast (false)
+{
+  NS_LOG_FUNCTION (this);
+}
+
 FdNetDevice::FdNetDevice ()
   : m_startEvent (),
     m_stopEvent (),
     m_freeBufferInRCallback (true),
-    m_mtu (1500), // Defaults to Ethernet v2 MTU
+    m_mtu (1500), // Default to Ethernet
     m_pendingReadCount (0),
     m_node (0),
     m_ifIndex (0),
@@ -259,7 +276,7 @@ FdNetDevice::StopDevice (void)
 void
 FdNetDevice::ReceiveCallback (uint8_t *buf, ssize_t len)
 {
-  NS_LOG_FUNCTION (this << buf << len);
+  NS_LOG_FUNCTION (this << buf << len << m_pendingReadCount);
   bool skip = false;
 
   {
@@ -282,6 +299,7 @@ FdNetDevice::ReceiveCallback (uint8_t *buf, ssize_t len)
     }
   else
     {
+      std::cout << "in alto " << m_nodeId << " " << std::endl;
       Simulator::ScheduleWithContext (m_nodeId, Time (0), MakeEvent (&FdNetDevice::ForwardUp, this, buf, len));
    }
 }
@@ -342,6 +360,7 @@ FdNetDevice::ForwardUp (uint8_t *buf, ssize_t len)
 {
   NS_LOG_FUNCTION (this << buf << len);
 
+  std::cout << "UP!!" << std::endl;
   if (m_pendingReadCount > 0)
     {
       {

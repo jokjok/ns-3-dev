@@ -102,6 +102,7 @@ public:
   /**
    * Constructor for the FdNetDevice.
    */
+  FdNetDevice (int mtu, int pendingReadCount);
   FdNetDevice ();
 
   /**
@@ -135,14 +136,14 @@ public:
    *
    * @param tStart the start time
    */
-  void Start (Time tStart);
+  virtual void Start (Time tStart);
 
   /**
    * Set a stop time for the device.
    *
    * @param tStop the stop time
    */
-  void Stop (Time tStop);
+  virtual void Stop (Time tStop);
 
   // inherited from NetDevice base class.
   virtual void SetIfIndex (const uint32_t index);
@@ -356,6 +357,27 @@ private:
   /**
    * \internal
    *
+   * The net device mac address.
+   */
+  Mac48Address m_address;
+
+  /**
+   * \internal
+   *
+   * Time to start spinning up the device
+   */
+  Time m_tStart;
+
+  /**
+   * \internal
+   *
+   * Time to start tearing down the device
+   */
+  Time m_tStop;
+
+  /**
+   * \internal
+   *
    * Callback to invoke when a new frame is received. If you don't want
    * the buffer to be free'd, set the m_freeBufferInRCallback flag in
    * a subclass.
@@ -428,13 +450,6 @@ private:
   /**
    * \internal
    *
-   * The net device mac address.
-   */
-  Mac48Address m_address;
-
-  /**
-   * \internal
-   *
    * Callbacks to fire if the link changes state (up or down).
    */
   TracedCallback<> m_linkChangeCallbacks;
@@ -454,20 +469,6 @@ private:
    * multicast.
    */
   bool m_isMulticast;
-
-  /**
-   * \internal
-   *
-   * Time to start spinning up the device
-   */
-  Time m_tStart;
-
-  /**
-   * \internal
-   *
-   * Time to start tearing down the device
-   */
-  Time m_tStop;
 };
 
 } // namespace ns3
