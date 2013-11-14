@@ -45,12 +45,19 @@ main (int argc, char *argv[])
 {
   uint32_t pktcount = 1024;
   int mode = 0;
-  char bufNm[] = "nmpktgen is a we";
-  char bufVeth[] = "nmpktgen is a well done packet generator.";
+  const char bufNm[] = "nmpktgen is a we";
+  const char bufVeth[] = "nmpktgen is a well done packet generator.";
+  std::string deviceName;
+  std::string destinationMAC = "ff:ff:ff:ff:ff:ff";
+  std::string sourceMAC = "00:00:00:00:00:01";
 
   CommandLine cmd;
-  cmd.AddValue ("pkt", "packet count", pktcount);
-  cmd.AddValue ("mode", "mode", mode);
+  cmd.AddValue ("n", "Packet number", pktcount);
+  cmd.AddValue ("mode", "Operative mode: 0 for Netmap, 1 for FdNetDevice", mode);
+  cmd.AddValue ("device", "Device name, default vale0:1 for Netmap or veth1 for FdNetDevice", deviceName);
+  cmd.AddValue ("destAddr", "Destination MAC Address", destinationMAC);
+  cmd.AddValue ("srcAddr", "Source MAC address", sourceMAC);
+
   cmd.Parse (argc, argv);
 
   std::list< Ptr<Packet> > pkts;
@@ -77,16 +84,22 @@ main (int argc, char *argv[])
 
   if (mode == 0)
     {
-      Ptr<NetmapNetDevice> d = Create<NetmapNetDevice>();
-      d->SetIfName ("vale0:1");
-      d->SetEncapsulationMode(FdNetDevice::LLC);
+      if (deviceName.empty())
+        deviceName = "vale0:1";
 
-      d->SendManyFrom(&burst, Mac48Address("00:00:00:00:00:01"),
-                      Mac48Address("ff:ff:ff:ff:ff:ff"), 0);
+      Ptr<NetmapNetDevice> d = Create<NetmapNetDevice>(deviceName);
+      d->SetEncapsulationMode(FdNetDevice::LLC);
+      d->SetAttribute("MaxPackets", UintegerValue (60));
+
+      d->SendManyFrom(&burst, Mac48Address(sourceMAC.c_str()),
+                      Mac48Address(destinationMAC.c_str()), 0);
     }
   else
     {
       Ptr<FdNetDevice> d = Create<FdNetDevice>();
+
+      if (deviceName.empty())
+        deviceName = "veth1";
 
       int sk;
       struct ifreq *if_idx = (struct ifreq*) malloc(sizeof(struct ifreq));
@@ -101,7 +114,7 @@ main (int argc, char *argv[])
         }
 
       memset(if_idx, 0, sizeof(struct ifreq));
-      strncpy(if_idx->ifr_name, "veth1", IFNAMSIZ-1);
+      strncpy(if_idx->ifr_name, deviceName.c_str(), IFNAMSIZ-1);
 
       if (ioctl(sk, SIOCGIFINDEX, if_idx) < 0)
         {
@@ -131,7 +144,7 @@ main (int argc, char *argv[])
         }
 
       memset(&if_mac, 0, sizeof(struct ifreq));
-      strncpy(if_mac.ifr_name, "veth1", IFNAMSIZ-1);
+      strncpy(if_mac.ifr_name, deviceName.c_str(), IFNAMSIZ-1);
 
       if (ioctl(sk, SIOCGIFHWADDR, &if_mac) < 0)
         {
@@ -144,8 +157,8 @@ main (int argc, char *argv[])
 
       for (it = pkts.begin(); it != pkts.end(); ++it)
         {
-          d->SendFrom(*it, Mac48Address("b6:b3:95:e9:46:6a"),
-                      Mac48Address("ff:ff:ff:ff:ff:ff"), 0);
+          d->SendFrom(*it, Mac48Address(sourceMAC.c_str()),
+                      Mac48Address(destinationMAC.c_str()), 0);
         }
 
       free(if_idx);
