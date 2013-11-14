@@ -74,10 +74,12 @@ main (int argc, char *argv[])
   Ptr<NetDevice> d1 = devices.Get (0);
   Ptr<NetmapNetDevice> clientDevice = d1->GetObject<NetmapNetDevice> ();
   clientDevice->SetIfName ("vale0:1");
+  clientDevice->Start();
 
   Ptr<NetDevice> d2 = devices.Get (1);
   Ptr<NetmapNetDevice> serverDevice = d2->GetObject<NetmapNetDevice> ();
   clientDevice->SetIfName ("vale0:2");
+  clientDevice->Start();
 
   NS_LOG_INFO ("Add Internet Stack");
   InternetStackHelper internetStackHelper;
