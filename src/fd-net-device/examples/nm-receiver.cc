@@ -24,30 +24,45 @@
 #include "ns3/netmap-net-device.h"
 #include "ns3/netmap-net-device-helper.h"
 #include "ns3/applications-module.h"
+#include "ns3/system-mutex.h"
 #include <unistd.h>
 
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE ("NetmapNetDeviceReceiver");
 
-
-bool printPacket(Ptr<NetDevice> net,Ptr<const Packet> pkt, uint16_t protocol,
-                 const Address & addr)
+void HandleRead (Ptr<const Packet> pkt)
 {
-  return true;
+  std::cout << pkt << std::endl;
 }
+
 
 int
 main (int argc, char *argv[])
 {
+  std::string deviceName = "vale0:1";
+  uint32_t packet = 1024;
+
   CommandLine cmd;
+  cmd.AddValue ("n", "Packet number", packet);
+  cmd.AddValue ("deviceName", "Device name", deviceName);
   cmd.Parse (argc, argv);
 
-  Ptr<NetmapNetDevice> d = Create<NetmapNetDevice>();
-  d->SetIfName ("vale0:1");
+  NodeContainer nodes;
+  nodes.Create (1);
 
-  d->SetReceiveCallback(MakeCallback(&printPacket));
+  NS_LOG_INFO ("Create Device");
+  NetmapNetDeviceHelper fd;
+  NetDeviceContainer devices = fd.Install (nodes);
 
-  usleep(10000000);
+  Ptr<NetDevice> d1 = devices.Get (0);
+  Ptr<NetmapNetDevice> clientDevice = d1->GetObject<NetmapNetDevice> ();
+  clientDevice->SetIfName (deviceName);
+
+  clientDevice->TraceConnectWithoutContext ("MacPromiscRx", MakeCallback(&HandleRead));
+
+  Simulator::Stop (Seconds (30.0));
+  Simulator::Run ();
+  Simulator::Destroy ();
 }
 
