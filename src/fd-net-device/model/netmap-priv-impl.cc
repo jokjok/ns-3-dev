@@ -36,100 +36,47 @@ namespace ns3 {
 
 NS_LOG_COMPONENT_DEFINE ("NetmapPrivImpl");
 
-void NetmapPrivImpl::DoRead ()
+NetmapFdReader::Data NetmapPrivImpl::DoRead (void)
 {
-  struct pollfd fds[1];
+  NS_LOG_FUNCTION (this);
+
   struct netmap_ring *rx_ring;
   uint32_t i, cur;
-  uint16_t rx, limit, id_b, id_e;
+  uint16_t rx, limit, len;
   uint8_t *buf;
 
-  /* setup poll(2) mechanism. */
-  memset (fds, 0, sizeof (fds));
-  fds[0].fd = m_fd;
-  fds[0].events = (POLLIN);
-
-  while (m_readThreadRun)
+  for (i = m_begin; i < m_end; ++i)
     {
-      if (poll (fds, 1, 1 * 1000) <= 0)
+      rx_ring = NETMAP_RXRING (m_nifp, i);
+
+      if (rx_ring->avail == 0)
+        continue;
+
+      limit = 1;
+      cur = rx_ring->cur;
+
+      if (rx_ring->avail < limit)
+        limit = rx_ring->avail;
+
+      for (rx = 0; rx < limit; ++rx)
         {
-          continue;
+          struct netmap_slot *slot = &rx_ring->slot[cur];
+          buf = (uint8_t*) NETMAP_BUF (rx_ring, slot->buf_idx);
+          len = slot->len;
+
+          cur = NETMAP_RING_NEXT (rx_ring, cur);
         }
 
-      for (i = m_begin; i < m_end; ++i)
-        {
-          rx_ring = NETMAP_RXRING (m_nifp, i);
+      rx_ring->avail -= rx;
+      rx_ring->cur = cur;
 
-          if (rx_ring->avail == 0)
-            continue;
-
-          id_b = m_readBuffer_bit->id;
-          id_e = m_readBuffer_eit->id;
-
-          if (id_b == id_e)
-            limit = BUFFER_LENGTH / 2; // TODO: 2 = m_end-m_begin+1
-          else if (id_e > id_b)
-            limit = BUFFER_LENGTH - (id_e - id_b);
-          else
-            limit = id_b - id_e;
-
-          cur = rx_ring->cur;
-
-          if (rx_ring->avail < limit)
-            limit = rx_ring->avail;
-
-          for (rx = 0; rx < limit; ++rx)
-            {
-              struct netmap_slot *slot = &rx_ring->slot[cur];
-              buf = (uint8_t*) NETMAP_BUF (rx_ring, slot->buf_idx);
-
-              m_readBuffer_eit->buffer = buf;
-              m_readBuffer_eit->len = slot->len;
-
-              m_readBuffer_eit = m_readBuffer_eit->next;
-
-              cur = NETMAP_RING_NEXT (rx_ring, cur);
-            }
-
-          rx_ring->avail -= rx;
-          rx_ring->cur = cur;
-
-          m_received += rx;
-        }
-
-      if (m_readBuffer_bit != m_readBuffer_eit)
-        {
-          m_consumerCond.SetCondition (true);
-          m_consumerCond.Broadcast ();
-        }
-
-      // tell the card we have read the data
-      ioctl (fds[0].fd, NIOCRXSYNC, NULL);
+      m_received += rx;
     }
 
-  m_readThreadRun = false;
-}
+  // tell the card we have read the data
+  ioctl (m_fd, NIOCRXSYNC, NULL);
 
-void
-NetmapPrivImpl::Consume ()
-{
-  NetmapPacketCB *end;
-
-  while (m_consumerThreadRun)
-    {
-      m_consumerCond.Wait ();
-      m_consumerCond.SetCondition (false);
-
-      end = m_readBuffer_eit;
-
-      while (m_readBuffer_bit != end)
-        {
-          m_q->ReceiveCallback (m_readBuffer_bit->buffer, m_readBuffer_bit->len);
-          m_readBuffer_bit = m_readBuffer_bit->next;
-          ++m_processed;
-        }
-
-    }
+  return NetmapFdReader::Data (buf, len);
 }
 
 /**
@@ -142,7 +89,8 @@ NetmapPrivImpl::Consume ()
  * \param q NetmapNetDevice from which is called
  */
 NetmapPrivImpl::NetmapPrivImpl (NetmapNetDevice *q)
-  : m_q (q),
+  : NetmapFdReader(),
+    m_q (q),
     m_ifName (""),
     m_infosAreValid (false),
     m_txRings (0),
@@ -150,28 +98,10 @@ NetmapPrivImpl::NetmapPrivImpl (NetmapNetDevice *q)
     m_slotTx (0),
     m_slotRx (0),
     m_mmapMemSize (0),
-    m_mmapMem(0),
-    m_fd(-1)
+    m_mmapMem(0)
 {
   m_received = 0;
   m_processed = 0;
-
-  m_readBuffer_bit = new NetmapPacketCB;
-  m_readBuffer_bit->id = 0;
-
-  m_readBuffer_eit = m_readBuffer_bit;
-
-  for (uint16_t i=1; i < BUFFER_LENGTH; ++i)
-    {
-      NetmapPacketCB *pkt = new NetmapPacketCB;
-      pkt->id = i;
-
-      m_readBuffer_eit->next = pkt;
-      m_readBuffer_eit = pkt;
-    }
-
-  m_readBuffer_eit->next = m_readBuffer_bit;
-  m_readBuffer_eit = m_readBuffer_bit;
 }
 
 /**
@@ -183,28 +113,6 @@ NetmapPrivImpl::NetmapPrivImpl (NetmapNetDevice *q)
  */
 NetmapPrivImpl::~NetmapPrivImpl()
 {
-  m_readThreadRun = false;
-
-  m_consumerThreadRun = false;
-  m_consumerCond.SetCondition (true);
-  m_consumerCond.Broadcast ();
-
-  m_readThread->Join ();
-  m_consumerThread->Join ();
-
-  m_readBuffer_eit = m_readBuffer_bit->next;
-
-  while (m_readBuffer_eit != m_readBuffer_bit)
-    {
-      NetmapPacketCB *temp = m_readBuffer_eit;
-      m_readBuffer_eit = m_readBuffer_eit->next;
-
-      delete temp;
-    }
-
-  delete m_readBuffer_bit;
-
-  std::cout << "received=" << m_received << " processed= " << m_processed << std::endl;
 }
 
 /**
@@ -314,15 +222,6 @@ NetmapPrivImpl::StartNmMode ()
           return false;
         }
     }
-
-  m_readThreadRun = true;
-  m_readThread = Create<SystemThread> ( MakeCallback (&NetmapPrivImpl::DoRead, this));
-  m_readThread->Start ();
-
-  m_consumerThreadRun = true;
-  m_consumerCond.SetCondition(false);
-  m_consumerThread = Create<SystemThread> ( MakeCallback (&NetmapPrivImpl::Consume, this));
-  m_consumerThread->Start ();
 
   return true;
 }

@@ -21,6 +21,9 @@
 
 #include "ns3/llc-snap-header.h"
 #include "ns3/ethernet-trailer.h"
+#include "ns3/enum.h"
+#include "ns3/uinteger.h"
+#include "ns3/boolean.h"
 #include "ns3/simulator.h"
 #include "ns3/log.h"
 
@@ -35,16 +38,27 @@ NetmapNetDevice::GetTypeId (void)
 {
   static TypeId tid = TypeId ("ns3::NetmapNetDevice")
     .SetParent<FdNetDevice> ()
-    .AddConstructor<NetmapNetDevice> ();
+    .AddConstructor<NetmapNetDevice> ()
+    ;
 
   return tid;
 }
 
 NetmapNetDevice::NetmapNetDevice ()
-  : FdNetDevice (),
+  : FdNetDevice (1500, 1024),
     m_ifName (""),
     m_d (new NetmapPrivImpl (this))
 {
+  NS_LOG_FUNCTION (this);
+  m_freeBufferInRCallback = false;
+}
+
+NetmapNetDevice::NetmapNetDevice (const std::string& ifName)
+  : FdNetDevice (1500, 1024),
+    m_ifName (ifName),
+    m_d (new NetmapPrivImpl (this))
+{
+  NS_LOG_FUNCTION (this);
   m_freeBufferInRCallback = false;
 }
 
@@ -57,12 +71,23 @@ NetmapNetDevice::~NetmapNetDevice ()
   delete m_d;
 }
 
+void NetmapNetDevice::SetIfName(const std::string &ifName)
+{
+  m_ifName = ifName;
+  Start();
+}
+
 void
 NetmapNetDevice::Start (Time tStart)
 {
   NS_LOG_FUNCTION (tStart);
   Simulator::Cancel (m_startEvent);
   m_startEvent = Simulator::Schedule (tStart, &NetmapNetDevice::StartDevice, this);
+}
+
+void NetmapNetDevice::Start()
+{
+  Start (m_tStart);
 }
 
 void
@@ -77,6 +102,8 @@ void
 NetmapNetDevice::StartDevice (void)
 {
   NS_LOG_FUNCTION (this);
+
+  m_nodeId = GetNode ()->GetId ();
 
   if (!m_d->IsSystemNetmapCapable ())
     {
@@ -95,7 +122,10 @@ NetmapNetDevice::StartDevice (void)
           m_d->SetIfName (m_ifName);
           m_d->OpenFd ();
           if (m_d->StartNmMode ())
-            m_linkUp = true;
+            {
+              m_linkUp = true;
+              m_d->Start (MakeCallback (&NetmapNetDevice::ReceiveCallback, this));
+            }
           else
             {
               NS_LOG_WARN("Can't open NM mode on device.");
@@ -119,13 +149,6 @@ NetmapNetDevice::StopDevice (void)
 
   m_d->StopNmMode ();
   m_d->CloseFd ();
-}
-
-void
-NetmapNetDevice::SetIfName (const std::string& ifName)
-{
-  m_ifName = ifName;
-  StartDevice ();
 }
 
 std::string

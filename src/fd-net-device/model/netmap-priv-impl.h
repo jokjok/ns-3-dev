@@ -27,6 +27,7 @@
 #include "ns3/system-mutex.h"
 #include "ns3/system-thread.h"
 #include "ns3/system-condition.h"
+#include "../helper/netmap-fd-reader.h"
 
 struct netmap_if;
 struct netmap_ring;
@@ -34,14 +35,6 @@ struct netmap_ring;
 namespace ns3 {
 
 class NetmapNetDevice;
-
-struct NetmapPacketCB
-{
-  uint8_t *buffer;
-  uint16_t len;
-  uint16_t id;
-  NetmapPacketCB *next;
-};
 
 /**
  * \ingroup netmap-net-device
@@ -52,13 +45,9 @@ struct NetmapPacketCB
  * Here will be many low-level details, so be prepared :-)
  *
  */
-class NetmapPrivImpl
+class NetmapPrivImpl : public NetmapFdReader
 {
 public:
-
-  /* Bounded-buffer length */
-  static const int BUFFER_LENGTH = 1024;
-
   /**
    * \brief Check if the given device is netmap capable
    *
@@ -124,8 +113,7 @@ public:
   uint32_t GetMmapMemSize   ();
 
 protected:
-  void DoRead ();
-  void Consume ();
+  NetmapFdReader::Data DoRead (void);
 
   NetmapNetDevice *m_q;
 
@@ -133,16 +121,6 @@ private:
 
   void UpdateInfos();
   void ResetInfos();
-
-  NetmapPacketCB *m_readBuffer_bit;
-  NetmapPacketCB *m_readBuffer_eit;
-
-  Ptr<SystemThread> m_readThread;
-  Ptr<SystemThread> m_consumerThread;
-  bool m_readThreadRun;
-  bool m_consumerThreadRun;
-
-  SystemCondition m_consumerCond;
 
   std::string m_ifName;
   bool m_infosAreValid;
@@ -156,13 +134,12 @@ private:
 
   char *m_mmapMem;
 
-  int m_fd;
-
   struct netmap_if *m_nifp;
 
   uint32_t m_begin, m_end;            /* first..last+1 rings to check */
   struct netmap_ring *m_tx, *m_rx;    /* shortcuts */
 
+  uint32_t m_bufferSize;
 
   // TEST
 

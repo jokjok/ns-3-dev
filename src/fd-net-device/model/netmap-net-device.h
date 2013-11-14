@@ -67,19 +67,16 @@ public:
   /**
    * Constructor for the NetmapNetDevice.
    */
+
   NetmapNetDevice ();
+  NetmapNetDevice (const std::string& ifName);
 
   /**
    * Destructor for the NetmapNetDevice.
    */
   virtual ~NetmapNetDevice ();
 
-  /**
-   * Interface to open in netmap mode
-   *
-   * \param ifName Interface name
-   */
-  void SetIfName (const std::string& ifName);
+  void SetIfName(const std::string& ifName);
 
   /**
    * Get the interface name associated to this NetmapNedDevice
@@ -90,6 +87,8 @@ public:
 
   // From FdNetDevice
   virtual void Start (Time tStart);
+  virtual void Start ();
+
   virtual void Stop (Time tStop);
 
   // From NetDevice
