@@ -58,8 +58,8 @@ def configure(conf):
         conf.msg("Checking for NSC location", False)
         conf.report_optional_feature("nsc", "Network Simulation Cradle", False,
                                      "NSC not found (see option --with-nsc)")
-	return
-    
+        return
+
     if Options.platform in ['linux', 'freebsd']:
         arch = os.uname()[4]
     else:
@@ -71,7 +71,7 @@ def configure(conf):
         conf.check_nonfatal(mandatory=True, lib='dl', define_name='HAVE_DL', uselib_store='DL')
         ok = True
     conf.msg('Checking for NSC supported architecture ' + (arch or ''), ok)
-    
+
     if not ok:
         conf.env['NSC_ENABLED'] = False
         conf.report_optional_feature("nsc", "Network Simulation Cradle", False,
@@ -145,6 +145,7 @@ def build(bld):
         'model/tcp-westwood.cc',
         'model/tcp-rx-buffer.cc',
         'model/tcp-tx-buffer.cc',
+        'model/tcp-noordwijk.cc',
         'model/ipv4-packet-info-tag.cc',
         'model/ipv6-packet-info-tag.cc',
         'model/ipv4-interface-address.cc',
@@ -293,7 +294,7 @@ def build(bld):
         'helper/ipv6-interface-container.h',
         'helper/ipv6-routing-helper.h',
         'model/ipv6-address-generator.h',
-        'model/tcp-rfc793.h',        
+        'model/tcp-rfc793.h',
         'model/tcp-tahoe.h',
         'model/tcp-reno.h',
         'model/tcp-newreno.h',
@@ -301,6 +302,7 @@ def build(bld):
         'model/tcp-socket-base.h',
         'model/tcp-tx-buffer.h',
         'model/tcp-rx-buffer.h',
+        'model/tcp-noordwijk.h',
         'model/rtt-estimator.h',
         'model/ipv4-packet-probe.h',
         'model/ipv6-packet-probe.h',
