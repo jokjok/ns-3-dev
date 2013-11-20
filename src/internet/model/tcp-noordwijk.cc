@@ -45,7 +45,7 @@ NS_LOG_COMPONENT_DEFINE ("TcpNoordwijk");
 using namespace ns3;
 
 #define STAB_FACTOR 2
-#define BETA Time::FromInteger(2, S)
+#define BETA Time::FromInteger(2, Time::S)
 #define DEFAULT_BURST_SIZE 20
 
 TcpNoordwijk::TcpNoordwijk ()
@@ -79,7 +79,7 @@ int TcpNoordwijk::Send (Ptr<Packet> p, uint32_t flags)
       // Transmit if burst size is reached
       NS_LOG_LOGIC ("txBufSize=" << m_txBuffer.Size () << " state " << TcpStateName[m_state]);
 
-      if (m_txBuffer.Size() >= (m_burstSize-m_retrBurstMod))
+      if (m_txBuffer.Size() >= (uint8_t)(m_burstSize-m_retrBurstMod))
         {
           if (m_state == ESTABLISHED || m_state == CLOSE_WAIT)
             { // Try to send the data out
@@ -98,11 +98,10 @@ int TcpNoordwijk::Send (Ptr<Packet> p, uint32_t flags)
 }
 
 void
-TcpNoordwijk::RateAdjustment(const Time& delta, const Time& deltaRtt)
+TcpNoordwijk::RateAdjustment(const Time& deltaGrande, const Time& deltaRtt)
 {
-  // todo: scritta un pò meglio?
-  m_burstSize = (delta.GetMilliSeconds() /
-      (delta.GetMilliSeconds() + deltaRtt.GetMilliSeconds())) * m_burstSize;
+  int64_t denominatore = 1 + (deltaRtt.GetMilliSeconds() / deltaGrande.GetMilliSeconds());
+  m_burstSize = m_burstSize / denominatore;
 }
 
 void
@@ -132,8 +131,8 @@ TcpNoordwijk::NewAck (SequenceNumber32 const& ack)
     }
   else if (m_ackCount == m_burstSize)
     {
-      Time delta = (Simulator::Now () - m_firstAck);
-      delta = Time(delta.GetMilliSeconds()/m_burstSize);
+      Time deltaGrande = (Simulator::Now () - m_firstAck);
+      Time deltaPiccolo = Time::FromInteger(deltaGrande.GetMilliSeconds()/m_burstSize, Time::MS);
 
       m_ackCount = 0;
       ++m_trainReceived;
@@ -144,7 +143,7 @@ TcpNoordwijk::NewAck (SequenceNumber32 const& ack)
         {
           if (m_lastRtt-m_minRtt > BETA)
             {
-              RateAdjustment(delta, m_lastRtt-m_minRtt);
+              RateAdjustment(deltaGrande, m_lastRtt-m_minRtt);
             }
           else
             {
@@ -241,7 +240,8 @@ TcpNoordwijk::DupAck (const TcpHeader& t, uint32_t count)
 }
 
 // Retransmit timeout
-void TcpNoordwijk::Retransmit (void)
+void
+TcpNoordwijk::Retransmit (void)
 {
   NS_LOG_FUNCTION (this);
   NS_LOG_LOGIC (this << " ReTxTimeout Expired at time " << Simulator::Now ().GetSeconds ());
@@ -259,4 +259,43 @@ void TcpNoordwijk::Retransmit (void)
 
   m_rtt->IncreaseMultiplier ();             // Double the next RTO
   DoRetransmit ();                          // Retransmit only one packet (the head)
+}
+
+void
+TcpNoordwijk::SetSegSize (uint32_t size)
+{
+  (void) size;
+  NS_ABORT_MSG ("TcpNoordwijik::SetSegSize() not available");
+}
+
+void
+TcpNoordwijk::SetSSThresh (uint32_t threshold)
+{
+  (void) threshold;
+  NS_ABORT_MSG ("TcpNoordwijik::SetSSThresh() not available");
+}
+
+uint32_t
+TcpNoordwijk::GetSSThresh (void) const
+{
+  return 0;
+}
+
+void
+TcpNoordwijk::SetInitialCwnd (uint32_t cwnd)
+{
+  (void) cwnd;
+  NS_ABORT_MSG ("TcpNoordwijik::SetInitialCwnd() not available");
+}
+
+uint32_t
+TcpNoordwijk::GetInitialCwnd (void) const
+{
+  return 0;
+}
+
+Ptr<TcpSocketBase>
+TcpNoordwijk::Fork (void)
+{
+  return CopyObject<TcpNoordwijk> (this);
 }
