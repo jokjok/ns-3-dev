@@ -275,7 +275,7 @@ protected:
    * \param withAck forces an ACK to be sent
    * \returns true if some data have been sent
    */
-  bool SendPendingData (bool withAck = false);
+  virtual bool SendPendingData (bool withAck = false);
 
   /**
    * \brief Extract at most maxSize bytes from the TxBuffer at sequence seq, add the
@@ -308,7 +308,6 @@ protected:
    * \returns true if it is in range
    */
   bool OutOfRange (SequenceNumber32 head, SequenceNumber32 tail) const;
-
 
   // Helper functions: Connection close
 
