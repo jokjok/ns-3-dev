@@ -27,27 +27,56 @@ namespace ns3 {
 class TcpNoordwijk : public TcpSocketBase
 {
 public:
+  static TypeId GetTypeId (void);
+
   TcpNoordwijk();
 
-  virtual int Send (Ptr<Packet> p, uint32_t flags);  // Call by app to send data to network
+  // From TcpSocketBase
+  virtual int Connect (const Address &address);
+  virtual int Listen (void);
 
 protected:
   virtual void NewAck (SequenceNumber32 const& seq); // Update buffers w.r.t. ACK
+  virtual Ptr<TcpSocketBase> Fork (void); // Call CopyObject<TcpReno> to clone me
   virtual void DupAck (const TcpHeader& t, uint32_t count);
   virtual void Retransmit (void); // Retransmit timeout
+  virtual bool SendPendingData (bool withAck = false); // Send as much as the window allows
+
+  // Implementing ns3::TcpSocket -- Attribute get/set
+  virtual void     SetSSThresh (uint32_t threshold);
+  virtual uint32_t GetSSThresh (void) const;
+  virtual void     SetInitialCwnd (uint32_t cwnd);
+  virtual uint32_t GetInitialCwnd (void) const;
 
 private:
+  void ExitPrioMode();
   void RateTracking();
   void RateAdjustment(const Time& delta, const Time& deltaRtt);
 
-  uint8_t m_burstSize;
-  uint8_t m_retrBurstMod; // Retransmission modifier of the burst size. Retrans 5 packet, next burst is
-                          // (m_burstSize - 5) packets
+  uint32_t PrioritySendData(SequenceNumber32 const& from, SequenceNumber32 const& to,
+                            bool withAck);
+
+  uint32_t m_stabFactor;
+  uint32_t m_defBurstSize;
+  int32_t m_congThresold;
+
+  TracedValue<uint32_t> m_burstSize;
+  uint32_t m_burstUsed;
+
   Time m_firstAck;
-  uint8_t m_ackCount;
-  uint8_t m_trainReceived;
+  uint32_t m_ackCount;
+  uint32_t m_trainReceived;
 
   Time m_minRtt;
+  Time m_medRtt;
+
+  SequenceNumber32 m_lastByteOfLastBurst;
+
+  uint32_t m_packetsRetransmitted;
+  bool m_prioMode;
+
+  EventId m_prioModeEvent;
+  Time m_prioIgnoreDupAckTime;
 };
 
 }; // namespace ns3
