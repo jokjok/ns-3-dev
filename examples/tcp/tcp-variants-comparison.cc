@@ -1,6 +1,6 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
- * Copyright (c) 2013 ResiliNets, ITTC, University of Kansas 
+ * Copyright (c) 2013 ResiliNets, ITTC, University of Kansas
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -162,7 +162,8 @@ int main (int argc, char *argv[])
 
 
   CommandLine cmd;
-  cmd.AddValue("transport_prot", "Transport protocol to use: TcpTahoe, TcpReno, TcpNewReno, TcpWestwood, TcpWestwoodPlus ", transport_prot);
+  cmd.AddValue("transport_prot", "Transport protocol to use: TcpTahoe, TcpReno, TcpNewReno, "
+               "TcpWestwood, TcpWestwoodPlus, TcpNoordwijk", transport_prot);
   cmd.AddValue("error_p", "Packet error rate", error_p);
   cmd.AddValue("bandwidth", "Bottleneck bandwidth", bandwidth);
   cmd.AddValue("access_bandwidth", "Access link bandwidth", access_bandwidth);
@@ -220,6 +221,10 @@ int main (int argc, char *argv[])
       Config::SetDefault("ns3::TcpL4Protocol::SocketType", TypeIdValue (TcpWestwood::GetTypeId()));
       Config::SetDefault("ns3::TcpWestwood::ProtocolType", EnumValue(TcpWestwood::WESTWOODPLUS));
       Config::SetDefault("ns3::TcpWestwood::FilterType", EnumValue(TcpWestwood::TUSTIN));
+    }
+  else if (transport_prot.compare("TcpNoorwijk") == 0)
+    {
+      Config::SetDefault("ns3::TcpL4Protocol::SocketType", TypeIdValue (TcpTahoe::GetTypeId()));
     }
   else
     {
