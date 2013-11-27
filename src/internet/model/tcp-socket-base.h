@@ -172,7 +172,7 @@ protected:
   /**
    * \brief Schedule-friendly wrapper for Socket::NotifyConnectionSucceeded()
    */
-  void ConnectionSucceeded (void);
+  virtual void ConnectionSucceeded (void);
 
   /**
    * \brief Configure the endpoint to a local address. Called by Connect() if Bind() didn't specify one.
@@ -201,8 +201,6 @@ protected:
    * \param toAddress the address the connection is directed to
    */
   void CompleteFork (Ptr<Packet> p, const TcpHeader& tcpHeader, const Address& fromAddress, const Address& toAddress);
-
-
 
   // Helper functions: Transfer operation
 
