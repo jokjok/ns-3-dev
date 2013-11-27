@@ -24,6 +24,23 @@
 
 namespace ns3 {
 
+/** \brief TcpNoordwijk implementation
+ *
+ * TCP Noordwijk is a new transport protocol designed to optimize
+ * performance in a controlled environment whose characteristics
+ * are fairly known and managed, such as DVB-RCS link between I-PEPs.
+ * Main requirements in the protocol design were the optimization of
+ * the web traffic performance, while keeping good performance for
+ * large file transfers, and efficent bandwidth utilization over DAMA
+ * schemes. To achieve such goals, TCP Noordwijk proposes a novel
+ * sender-only modification to the standard TCP algorithms based
+ * on a burst transmission.
+ *
+ * To follow the protocol design and how it works, start from the function
+ * TcpNoordwijk::SendPendingData.
+ *
+ * \see SendPendingData
+ */
 class TcpNoordwijk : public TcpSocketBase
 {
 public:
@@ -42,6 +59,8 @@ protected:
   virtual void Retransmit (void); // Retransmit timeout
   virtual bool SendPendingData (bool withAck = false); // Send as much as the window allows
 
+  virtual void ConnectionSucceeded (void);
+
   // Implementing ns3::TcpSocket -- Attribute get/set
   virtual void     SetSSThresh (uint32_t threshold);
   virtual uint32_t GetSSThresh (void) const;
@@ -49,16 +68,16 @@ protected:
   virtual uint32_t GetInitialCwnd (void) const;
 
 private:
-  void ExitPrioMode();
+  void StartTxTimer();
   void RateTracking();
   void RateAdjustment(const Time& delta, const Time& deltaRtt);
-
-  uint32_t PrioritySendData(SequenceNumber32 const& from, SequenceNumber32 const& to,
-                            bool withAck);
 
   uint32_t m_stabFactor;
   uint32_t m_defBurstSize;
   int32_t m_congThresold;
+
+  Time m_defTxTimer;
+  TracedValue<Time> m_txTimer;
 
   TracedValue<uint32_t> m_burstSize;
   uint32_t m_burstUsed;
@@ -68,15 +87,14 @@ private:
   uint32_t m_trainReceived;
 
   Time m_minRtt;
-  Time m_medRtt;
-
-  SequenceNumber32 m_lastByteOfLastBurst;
 
   uint32_t m_packetsRetransmitted;
-  bool m_prioMode;
 
-  EventId m_prioModeEvent;
-  Time m_prioIgnoreDupAckTime;
+  SequenceNumber32 m_lastAckedSegmentInRTO;
+
+  EventId           m_txEvent;
+
+  bool m_restore;
 };
 
 }; // namespace ns3

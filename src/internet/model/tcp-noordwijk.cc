@@ -60,6 +60,10 @@ TcpNoordwijk::GetTypeId (void)
                     UintegerValue (20),
                     MakeUintegerAccessor (&TcpNoordwijk::m_defBurstSize),
                     MakeUintegerChecker<uint32_t> ())
+    .AddAttribute ("TxTimer", "Default transmission timer",
+                    TimeValue (MilliSeconds (500)),
+                    MakeTimeAccessor (&TcpNoordwijk::m_defTxTimer),
+                    MakeTimeChecker ())
     .AddAttribute ("B", "Congestion thresold",
                     IntegerValue (200),
                     MakeIntegerAccessor (&TcpNoordwijk::m_congThresold),
@@ -80,10 +84,9 @@ TcpNoordwijk::TcpNoordwijk ()
     m_ackCount(0),
     m_trainReceived(0),
     m_minRtt(Time::Max ()),
-    m_lastByteOfLastBurst(0),
     m_packetsRetransmitted(0),
-    m_prioMode(false),
-    m_prioIgnoreDupAckTime(0)
+    m_lastAckedSegmentInRTO(0),
+    m_restore(false)
 {
   SetTcpNoDelay(true);
 }
@@ -101,11 +104,49 @@ int
 TcpNoordwijk::Connect (const Address & address)
 {
   NS_LOG_FUNCTION (this << address);
+
   m_burstSize = m_defBurstSize;
+  m_txTimer = m_defTxTimer;
 
   return TcpSocketBase::Connect (address);
 }
 
+void
+TcpNoordwijk::ConnectionSucceeded (void)
+{
+  NS_LOG_FUNCTION(this);
+
+  StartTxTimer();
+
+  TcpSocketBase::ConnectionSucceeded();
+}
+
+void
+TcpNoordwijk::StartTxTimer()
+{
+  NS_LOG_FUNCTION(this);
+
+  m_txEvent = Simulator::Schedule (m_txTimer, &TcpNoordwijk::SendPendingData, this, true);
+}
+
+/**
+ * \brief Send as much pending data as possible according to the Tx window and the burst size
+ *
+ * In TCP Noordwijk, sender is limited, as it can't send more packets than the burst size. When
+ * called, this method checks if we have enough data to send (burst size) or the timer is expired
+ * (tx_timer), and if the latter holds, start send one burst of packets, without exceeding
+ * its dimension.
+ *
+ * When the burst size and tx_timer are updated? When ACKs are received, in TcpNoordwijk::NewAck.
+ *
+ * If a retransmission timer expires, perform a recovery actions (see TcpNoordwijk::Retransmit),
+ * and one of these is recover initial values of burst size and tx_timer. We do it after the last ack of
+ * the burst is received, and then performs Rate adjustment or tracking.
+ *
+ * \see NewAck
+ * \param withAck true if senders want an ack back
+ * \return true if some data was sended
+ */
 bool
 TcpNoordwijk::SendPendingData (bool withAck)
 {
@@ -120,11 +161,12 @@ TcpNoordwijk::SendPendingData (bool withAck)
       return false; // Is this the right way to handle this condition?
     }
 
-  // Stop sending if we don't have enough data to send
-  // TODO: Disabilitare con un timer
-  if (m_txBuffer.SizeFromSequence (m_nextTxSequence) < m_segmentSize*m_burstSize)
+
+  if (m_txEvent.IsRunning())
     {
-      return true; // No error. We choose to don't send anything, for now
+      NS_LOG_LOGIC(this << " Tx Timer actually running, initial value=" <<
+                   m_txTimer.Get().GetMilliSeconds() << " ms");
+      return true; // Actually we don't want to send, so no error..
     }
 
   while (m_txBuffer.SizeFromSequence (m_nextTxSequence) && m_burstUsed < m_burstSize)
@@ -146,28 +188,63 @@ TcpNoordwijk::SendPendingData (bool withAck)
       m_nextTxSequence += sz;                     // Advance next tx sequence
     }
 
-  m_lastByteOfLastBurst = m_nextTxSequence;
-
   NS_LOG_LOGIC (this << " sent " << m_burstUsed << " packets");
+
+  StartTxTimer();
 
   return (m_burstUsed > 0);
 }
 
-//TODO: English?
+/**
+ * \brief Rate Adjustment algorithm (there is congestion)
+ *
+ * Algorithm invoked when there are some symptom of congestion. Definining terms as:
+ *
+ * - \f$B_{i+1}\f$ as the next burst size
+ * - \f$B_{i}\f$ as the actual burst size
+ * (opportunely decreased by the number of retransmitted packets)
+ * - \f$\Delta_{i}\f$ as the ack train dispersion (in other words, the arrival time
+ * of first ack minus the arrival time of last ack)
+ * - \f${\Delta}RTT_{i}\f$ as the difference between last RTT and the minimun RTT
+ *
+ * We could define next burst size as:
+ * \f$B_{i+1} = \frac{\Delta_{i}}{\Delta_{i}+{\Delta}RTT_{i}} \cdot B_{i} = \frac{B_{i}}{1+\frac{{\Delta}RTT_{i}}{\Delta_{i}}}\f$
+ *
+ * \param ackTrainDispersion arrival time of first ack minus the arrival time of last ack
+ * \param deltaRtt difference between last RTT and the minimun RTT
+ */
 void
-TcpNoordwijk::RateAdjustment(const Time& deltaGrande, const Time& deltaRtt)
+TcpNoordwijk::RateAdjustment(const Time& ackTrainDispersion, const Time& deltaRtt)
 {
-  NS_LOG_FUNCTION(this << deltaGrande << deltaRtt);
-  NS_LOG_LOGIC (this << " burst=" << m_burstSize << " dGrande=" << deltaGrande.GetMilliSeconds() <<
-               " ms dRtt=" << deltaRtt.GetMilliSeconds());
+  NS_LOG_FUNCTION(this << ackTrainDispersion << deltaRtt);
+  NS_LOG_LOGIC (this << " before burst=" << m_burstSize << " atraindisp=" << ackTrainDispersion.GetMilliSeconds() <<
+                " ms dRtt=" << deltaRtt.GetMilliSeconds() << " ms");
 
-  int64_t denominatore = 1 + (deltaRtt.GetMilliSeconds() / deltaGrande.GetMilliSeconds());
+  int64_t denominator = 1 + (deltaRtt.GetMilliSeconds() / ackTrainDispersion.GetMilliSeconds());
 
-  m_burstSize = m_burstSize / denominatore;
+  m_burstSize = m_burstSize / denominator;
 
-  NS_LOG_LOGIC (this << " dopo burst=" << m_burstSize << " con denominatore=" << denominatore);
+  NS_LOG_LOGIC (this << " after burst=" << m_burstSize << " denominator=" << denominator);
 }
 
+/**
+ * \brief Rate tracking algorithm (no congestion)
+ *
+ * This algorithm aims at adapting transmission rate to the maximum allowed rate through the following
+ * steps: gradually increase burst size (logarithmic grow) up to the initial burst size, and tx_timer
+ * is fixed to the optimal value for default-sized bursts.
+ *
+ * With
+ *
+ * - \f$B_{0}\f$ as the default burst size
+ * - \f$B_{i+1}\f$ as the next burst size
+ * - \f$B_{i}\f$ as the actual burst size
+ * (opportunely decreased by the number of retransmitted packets)
+ *
+ * We could define next burst size as:
+ *
+ * \f$B_{i+1} = B_{i} + \frac{B_{0}-B_{i}}{2}\f$
+ */
 void
 TcpNoordwijk::RateTracking()
 {
@@ -178,46 +255,34 @@ TcpNoordwijk::RateTracking()
   NS_LOG_LOGIC (this << " dopo burst=" << m_burstSize);
 }
 
-uint32_t
-TcpNoordwijk::PrioritySendData(SequenceNumber32 const& from, SequenceNumber32 const& to,
-                               bool withAck = false)
-{
-  NS_LOG_FUNCTION (this << from << to << withAck);
-
-  if (m_txBuffer.Size () == 0)
-    {
-      return false;                           // Nothing to send
-    }
-  if (m_endPoint == 0 && m_endPoint6 == 0)
-    {
-      NS_LOG_INFO (this << " No endpoint; m_shutdownSend=" << m_shutdownSend);
-      return false; // Is this the right way to handle this condition?
-    }
-
-  NS_LOG_LOGIC (this << " Devo spedire da " << from << " a " << to);
-
-  SequenceNumber32 it = from;
-
-  uint32_t nPacketsSent = 0;
-
-  while (it < to)
-    {
-      uint32_t s = std::min (AvailableWindow (), m_segmentSize);  // Send no more than window
-      s = std::min (s, (uint32_t)(to-it));
-
-      uint32_t sz = SendDataPacket (it, s, withAck);
-
-      it += sz;
-
-      ++nPacketsSent;
-    }
-
-  return nPacketsSent;
-}
-
-// Called by the ReceivedAck() when new ACK received and by ProcessSynRcvd()
-// when the three-way handshake completed. This cancels retransmission timer
-// and advances Tx window
+/** \brief Received an ACK for a previously unacked segment
+ *
+ * Called by the ReceivedAck() when new ACK received and by ProcessSynRcvd()
+ * when the three-way handshake completed. This cancels retransmission timer
+ * and advances Tx window.
+ *
+ * Noordwijk adjust burst size and tx_timer after the ack of the last packet in
+ * the burst is arrived; so, we need to take the arrived ack count. These adjustment
+ * are made after a fixed number of arrived bursts (called stability factor, an attribute).
+ *
+ * When the last ack of the last burst is arrived, the size of next burst should be adjusted
+ * before all computation substracting the retransmitted packets count. After that,
+ * we compare the difference between the <i>lastest RTT</i> and the minimun RTT. If it is greater
+ * than a fixed value, called congestion thresold (an attribute for TCP Noordwijk) it enters
+ * the Rate Adjustment algorithm (control the congestion), implemented in the
+ * TcpNoordwijk::RateAdjustment method, otherwise it enters into
+ * Rate Tracking algorithm, implemented in TcpNoordwijk::RateTracking method.
+ *
+ * Packet losses are detected (and recovered) by the TcpNoordwijk::DupAck method, or when
+ * a timeout expires by TcpNoordwijk::Retransmit method.
+ *
+ * \see RateAdjustment
+ * \see RateTracking
+ * \see DupAck
+ * \see Retransmit
+ *
+ * \param ack Ack number
+ */
 void
 TcpNoordwijk::NewAck (SequenceNumber32 const& ack)
 {
@@ -246,52 +311,51 @@ TcpNoordwijk::NewAck (SequenceNumber32 const& ack)
       pktsAcked = (ack - m_txBuffer.HeadSequence ()) / m_segmentSize;
       m_ackCount += pktsAcked;
 
-      if (m_medRtt == 0)
-        {
-          m_medRtt = m_lastRtt;
-        }
-      else
-        {
-          m_medRtt = (m_medRtt + m_lastRtt) / 2;
-        }
-
       NS_LOG_LOGIC(this << " seg=" << ack.GetValue() << " cumulative ACK of " <<
-                   pktsAcked << " packets. lastRtt=" << m_lastRtt.Get().GetMilliSeconds() <<
-                   " medRtt=" << m_medRtt.GetMilliSeconds() << " ms");
+                   pktsAcked << " packets. lastRtt=" << m_lastRtt.Get().GetMilliSeconds());
 
+      // Keep controlled the ack count.
       if (m_ackCount == 1)
         {
           m_firstAck = Simulator::Now ();
-          NS_LOG_LOGIC(this << " Train first ACK, value=" << m_firstAck);
+          NS_LOG_LOGIC(this << " Train first ACK, arrived at=" <<
+                       m_firstAck.GetMilliSeconds() << " ms");
         }
       else if (m_ackCount >= m_burstSize)
         {
-          // todo deltagrande e deltapiccolo ?!?! English plz
-          Time deltaGrande = (Simulator::Now () - m_firstAck);
-          Time deltaPiccolo = Time::FromInteger(deltaGrande.GetMilliSeconds()/m_burstSize, Time::MS);
+          Time ackTrainDispersion = (Simulator::Now () - m_firstAck);
+          //Time deltaPiccolo = Time::FromInteger(ackTrainDispersion.GetMilliSeconds()/m_burstSize,
+          //                                      Time::MS);
 
-          NS_LOG_LOGIC(this << " ACK train completed. DeltaP=" << deltaPiccolo << " deltaG=" << deltaGrande);
+          NS_LOG_LOGIC(this << " ACK train completed. aTrainDisp=" <<
+                       ackTrainDispersion.GetMilliSeconds() << " ms");
 
-          if (m_prioMode)
+          // Are there some retransmitted packet? If not, it is ininfluent.
+          m_burstSize -= m_packetsRetransmitted;
+
+          if (m_burstSize == 0)
+            ++m_burstSize;
+
+          m_packetsRetransmitted = 0;
+
+          if (m_restore)
             {
-              NS_LOG_LOGIC(this << " I was in prio mode. Reduce burst by " << m_packetsRetransmitted << " pkts.");
-              m_burstSize -= m_packetsRetransmitted;
+              m_burstSize = m_defBurstSize;
+              m_txTimer = m_defTxTimer;
 
-              if (m_burstSize == 0)
-                ++m_burstSize;
-
-              m_packetsRetransmitted = 0;
+              m_restore = false;
             }
 
+          // Train and stability factor check
           ++m_trainReceived;
 
           if (m_trainReceived == m_stabFactor)
             {
-              NS_LOG_LOGIC(this << " medRtt=" << m_medRtt.GetMilliSeconds() <<
+              NS_LOG_LOGIC(this << " lastRtt=" << m_lastRtt.Get().GetMilliSeconds() <<
                            " min=" << m_minRtt.GetMilliSeconds());
-              if (m_medRtt-m_minRtt > m_congThresold)
+              if (m_lastRtt-m_minRtt > m_congThresold)
                 {
-                  RateAdjustment(deltaGrande, m_medRtt-m_minRtt);
+                  RateAdjustment(ackTrainDispersion, m_lastRtt-m_minRtt);
                 }
               else
                 {
@@ -337,12 +401,18 @@ TcpNoordwijk::NewAck (SequenceNumber32 const& ack)
     }
 
   // Try to send more data
-  if (m_burstSize-m_burstUsed > 0)
-    {
-      SendPendingData (m_connected);
-    }
+  SendPendingData (m_connected);
 }
 
+/**
+ * \brief Received a DupAck for a segment size
+ *
+ * There is (probably) a loss when we detect a triple dupack, so resend
+ * the next segment of duplicate ack. Increase also the retransmitted packet count.
+ *
+ * \param t TcpHeader (unused)
+ * \param count Dupack count
+ */
 void
 TcpNoordwijk::DupAck (const TcpHeader& t, uint32_t count)
 {
@@ -351,74 +421,39 @@ TcpNoordwijk::DupAck (const TcpHeader& t, uint32_t count)
   NS_LOG_LOGIC(this << " Dupack for segment " << t.GetAckNumber() << " count=" << count);
 
   // Wait the third dupack
-  if (m_prioMode || count != 3)
+  if (count % 3 != 0)
     return;
 
-  // Retransmit SYN packet
-  if (m_state == SYN_SENT)
-    {
-      if (m_cnCount > 0)
-        {
-          SendEmptyPacket (TcpHeader::SYN);
-        }
-      else
-        {
-          NotifyConnectionFailed ();
-        }
-      return;
-    }
+  DoRetransmit();
+  ++m_packetsRetransmitted;
 
-  // Retransmit non-data packet: Only if in FIN_WAIT_1 or CLOSING state
-  if (m_txBuffer.Size () == 0)
-    {
-      if (m_state == FIN_WAIT_1 || m_state == CLOSING)
-        { // Must have lost FIN, re-send
-          SendEmptyPacket (TcpHeader::FIN);
-        }
-      return;
-    }
-
-  uint32_t packetsRetransmitted = PrioritySendData(t.GetAckNumber(), m_lastByteOfLastBurst, true);
-  m_prioMode = true;
-  m_packetsRetransmitted = packetsRetransmitted;
-
-  m_prioIgnoreDupAckTime = m_rtt->GetCurrentEstimate();
-  m_prioModeEvent = Simulator::Schedule (m_prioIgnoreDupAckTime, &TcpNoordwijk::ExitPrioMode, this);
-
-  NS_LOG_LOGIC(this << " Retransmitted " << packetsRetransmitted << " packets due to DupAck ");
+  NS_LOG_LOGIC(this << " This burst I retransmitted " << m_packetsRetransmitted << " packets due to DupAck ");
 }
 
-void
-TcpNoordwijk::ExitPrioMode()
-{
-  NS_LOG_FUNCTION(this);
-
-  m_prioMode = false;
-}
-
-// Retransmit timeout
+/**
+ * \brief Retransmit timeout
+ *
+ * Retransmit first non ack packet, increase the retransmitted packet count,
+ * and set recover flag for the initial values of burst size and tx_timer
+ *
+ * In case of consecutive RTO expiration, retransmission is repeated while the default
+ * tx_timer is doubled.
+ */
 void
 TcpNoordwijk::Retransmit (void)
 {
   NS_LOG_FUNCTION (this);
 
-  // If erroneous timeout in closed/timed-wait state, just return
-  if (m_state == CLOSED || m_state == TIME_WAIT)
-    return;
+  if (m_txBuffer.HeadSequence () == m_lastAckedSegmentInRTO)
+    {
+      m_defTxTimer = m_defTxTimer + m_defTxTimer;
+    }
 
-  // If all data are received (non-closing socket and nothing to send), just return
-  if (m_state <= ESTABLISHED && m_txBuffer.HeadSequence () >= m_highTxMark)
-    return;
+  m_lastAckedSegmentInRTO = m_txBuffer.HeadSequence ();
 
-  NS_LOG_LOGIC(this << " ReTxTimeout Expired at time " << Simulator::Now ().GetSeconds () <<
-               " recovering m_burstSize to default");
+  m_restore = true;
 
-  m_nextTxSequence = m_txBuffer.HeadSequence (); // Restart from highest Ack
-  m_dupAckCount = 0;
-  m_burstSize = m_defBurstSize;
-
-  m_rtt->IncreaseMultiplier ();             // Double the next RTO
-  DoRetransmit ();                          // Retransmit only one packet (the head)
+  TcpSocketBase::Retransmit();
 }
 
 void
