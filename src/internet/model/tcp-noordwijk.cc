@@ -62,12 +62,12 @@ TcpNoordwijk::GetTypeId (void)
                     MakeUintegerChecker<uint32_t> ())
     .AddAttribute ("TxTimer", "Default transmission timer",
                     TimeValue (MilliSeconds (500)),
-                    MakeTimeAccessor (&TcpNoordwijk::m_defTxTimer),
+                    MakeTimeAccessor (&TcpNoordwijk::m_defTxTime),
                     MakeTimeChecker ())
     .AddAttribute ("B", "Congestion thresold",
-                    IntegerValue (200),
-                    MakeIntegerAccessor (&TcpNoordwijk::m_congThresold),
-                    MakeIntegerChecker<int32_t> ())
+                    TimeValue (MilliSeconds (200)),
+                    MakeTimeAccessor (&TcpNoordwijk::m_congThresold),
+                    MakeTimeChecker ())
     .AddAttribute ("S", "Stability factor",
                     UintegerValue (2),
                     MakeUintegerAccessor (&TcpNoordwijk::m_stabFactor),
@@ -80,12 +80,13 @@ TcpNoordwijk::GetTypeId (void)
 }
 
 TcpNoordwijk::TcpNoordwijk ()
-  : m_burstUsed(0),
+  : m_firstAck(Time::FromInteger(0, Time::MS)),
     m_ackCount(0),
     m_trainReceived(0),
     m_minRtt(Time::Max ()),
     m_packetsRetransmitted(0),
     m_lastAckedSegmentInRTO(0),
+    m_txTimer(Timer::CANCEL_ON_DESTROY),
     m_restore(false)
 {
   SetTcpNoDelay(true);
@@ -106,7 +107,7 @@ TcpNoordwijk::Connect (const Address & address)
   NS_LOG_FUNCTION (this << address);
 
   m_burstSize = m_defBurstSize;
-  m_txTimer = m_defTxTimer;
+  m_txTime = m_defTxTime;
 
   return TcpSocketBase::Connect (address);
 }
@@ -116,8 +117,6 @@ TcpNoordwijk::ConnectionSucceeded (void)
 {
   NS_LOG_FUNCTION(this);
 
-  StartTxTimer();
-
   TcpSocketBase::ConnectionSucceeded();
 }
 
@@ -126,7 +125,10 @@ TcpNoordwijk::StartTxTimer()
 {
   NS_LOG_FUNCTION(this);
 
-  m_txEvent = Simulator::Schedule (m_txTimer, &TcpNoordwijk::SendPendingData, this, true);
+  m_txTimer.SetFunction(&TcpNoordwijk::SendPendingData, this);
+  m_txTimer.SetArguments(true);
+  m_txTimer.SetDelay(m_txTime);
+  m_txTimer.Schedule();
 }
 
 /**
@@ -151,27 +153,36 @@ bool
 TcpNoordwijk::SendPendingData (bool withAck)
 {
   NS_LOG_FUNCTION (this << withAck);
+
+  uint32_t packetSent = 0;
+
   if (m_txBuffer.Size () == 0)
     {
       return false;                           // Nothing to send
     }
+
   if (m_endPoint == 0 && m_endPoint6 == 0)
     {
       NS_LOG_INFO (this << " No endpoint; m_shutdownSend=" << m_shutdownSend);
       return false; // Is this the right way to handle this condition?
     }
 
-
-  if (m_txEvent.IsRunning())
+  // Wait buffer filling
+  if (m_txBuffer.SizeFromSequence (m_nextTxSequence) < std::min(m_segmentSize, AvailableWindow()) * m_burstSize)
     {
-      NS_LOG_LOGIC(this << " Tx Timer actually running, initial value=" <<
-                   m_txTimer.Get().GetMilliSeconds() << " ms");
+      return true;
+    }
+
+  if (m_txTimer.IsRunning())
+    {
+      NS_LOG_LOGIC(this << " Tx Timer actually running, remaining value=" <<
+                   m_txTimer.GetDelayLeft().GetMilliSeconds() << " ms");
       return true; // Actually we don't want to send, so no error..
     }
 
-  while (m_txBuffer.SizeFromSequence (m_nextTxSequence) && m_burstUsed < m_burstSize)
+  while (m_txBuffer.SizeFromSequence (m_nextTxSequence) && packetSent < m_burstSize)
     {
-      NS_LOG_LOGIC (this << " usedburst=" << m_burstUsed <<
+      NS_LOG_LOGIC (this << " usedburst=" << packetSent <<
                    " next_tx=" << m_nextTxSequence << " so I expect ack=" <<
                    m_nextTxSequence+m_segmentSize);
 
@@ -184,15 +195,15 @@ TcpNoordwijk::SendPendingData (bool withAck)
       uint32_t s = std::min (AvailableWindow (), m_segmentSize);  // Send no more than window
       uint32_t sz = SendDataPacket (m_nextTxSequence, s, withAck);
 
-      ++m_burstUsed;                              // Count sent
+      ++packetSent;                               // Count sent
       m_nextTxSequence += sz;                     // Advance next tx sequence
     }
 
-  NS_LOG_LOGIC (this << " sent " << m_burstUsed << " packets");
+  NS_LOG_LOGIC (this << " sent " << packetSent << " packets");
 
   StartTxTimer();
 
-  return (m_burstUsed > 0);
+  return (packetSent > 0);
 }
 
 /**
@@ -315,7 +326,7 @@ TcpNoordwijk::NewAck (SequenceNumber32 const& ack)
                    pktsAcked << " packets. lastRtt=" << m_lastRtt.Get().GetMilliSeconds());
 
       // Keep controlled the ack count.
-      if (m_ackCount == 1)
+      if (m_firstAck.IsZero())
         {
           m_firstAck = Simulator::Now ();
           NS_LOG_LOGIC(this << " Train first ACK, arrived at=" <<
@@ -341,7 +352,7 @@ TcpNoordwijk::NewAck (SequenceNumber32 const& ack)
           if (m_restore)
             {
               m_burstSize = m_defBurstSize;
-              m_txTimer = m_defTxTimer;
+              m_txTime = m_defTxTime;
 
               m_restore = false;
             }
@@ -364,8 +375,12 @@ TcpNoordwijk::NewAck (SequenceNumber32 const& ack)
               m_trainReceived = 0;
             }
 
+          m_minRtt = Time::Max();
           m_ackCount = 0;
-          m_burstUsed = 0;
+          m_firstAck = Time::FromInteger(0, Time::MS);
+
+          // Try to send more data
+          SendPendingData (m_connected);
         }
     }
 
@@ -399,9 +414,6 @@ TcpNoordwijk::NewAck (SequenceNumber32 const& ack)
                     (Simulator::Now () + Simulator::GetDelayLeft (m_retxEvent)).GetSeconds ());
       m_retxEvent.Cancel ();
     }
-
-  // Try to send more data
-  SendPendingData (m_connected);
 }
 
 /**
@@ -446,7 +458,7 @@ TcpNoordwijk::Retransmit (void)
 
   if (m_txBuffer.HeadSequence () == m_lastAckedSegmentInRTO)
     {
-      m_defTxTimer = m_defTxTimer + m_defTxTimer;
+      m_defTxTime = m_defTxTime + m_defTxTime;
     }
 
   m_lastAckedSegmentInRTO = m_txBuffer.HeadSequence ();

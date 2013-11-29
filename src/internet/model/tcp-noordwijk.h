@@ -21,6 +21,7 @@
 #define TCPNOORDWIJK_H
 
 #include "tcp-socket-base.h"
+#include "ns3/timer.h"
 
 namespace ns3 {
 
@@ -74,13 +75,12 @@ private:
 
   uint32_t m_stabFactor;
   uint32_t m_defBurstSize;
-  int32_t m_congThresold;
+  Time m_congThresold;
 
-  Time m_defTxTimer;
-  TracedValue<Time> m_txTimer;
+  Time m_defTxTime;
+  TracedValue<Time> m_txTime;
 
   TracedValue<uint32_t> m_burstSize;
-  uint32_t m_burstUsed;
 
   Time m_firstAck;
   uint32_t m_ackCount;
@@ -92,7 +92,7 @@ private:
 
   SequenceNumber32 m_lastAckedSegmentInRTO;
 
-  EventId           m_txEvent;
+  Timer m_txTimer;
 
   bool m_restore;
 };
