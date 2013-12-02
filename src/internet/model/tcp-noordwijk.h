@@ -87,6 +87,7 @@ private:
   uint32_t m_trainReceived;
 
   Time m_minRtt;
+  Time m_ackDispersion;
 
   uint32_t m_packetsRetransmitted;
 
@@ -95,6 +96,9 @@ private:
   Timer m_txTimer;
 
   bool m_restore;
+
+  const uint8_t m_lambda;
+  const uint8_t m_burstMin;
 };
 
 }; // namespace ns3

@@ -87,7 +87,9 @@ TcpNoordwijk::TcpNoordwijk ()
     m_packetsRetransmitted(0),
     m_lastAckedSegmentInRTO(0),
     m_txTimer(Timer::CANCEL_ON_DESTROY),
-    m_restore(false)
+    m_restore(false),
+    m_lambda(2),
+    m_burstMin(3)
 {
   SetTcpNoDelay(true);
 }
@@ -217,9 +219,17 @@ TcpNoordwijk::SendPendingData (bool withAck)
  * - \f$\Delta_{i}\f$ as the ack train dispersion (in other words, the arrival time
  * of first ack minus the arrival time of last ack)
  * - \f${\Delta}RTT_{i}\f$ as the difference between last RTT and the minimun RTT
+ * - \f$\delta_{i} = \frac{Time_{LastAck} - Time_{FirstAck}}{B_{i}}\f$ as the ack dispersion of
+ *   the \f$i\f$-th burst
  *
  * We could define next burst size as:
  * \f$B_{i+1} = \frac{\Delta_{i}}{\Delta_{i}+{\Delta}RTT_{i}} \cdot B_{i} = \frac{B_{i}}{1+\frac{{\Delta}RTT_{i}}{\Delta_{i}}}\f$
+ *
+ * We also compute a new TX_TIMER:
+ *
+ * \f$TX_TIMER_{i+1} = \lambda * B_{0} * \delta_{i}\f$
+ *
+ * Where \f$\lambda = 1 \f$ if \f$B_{i+1}\f$ is greater than a fixed value (3 packets), \f$\lambda=2\f$ otherwise.
  *
  * \param ackTrainDispersion arrival time of first ack minus the arrival time of last ack
  * \param deltaRtt difference between last RTT and the minimun RTT
@@ -228,14 +238,24 @@ void
 TcpNoordwijk::RateAdjustment(const Time& ackTrainDispersion, const Time& deltaRtt)
 {
   NS_LOG_FUNCTION(this << ackTrainDispersion << deltaRtt);
-  NS_LOG_LOGIC (this << " before burst=" << m_burstSize << " atraindisp=" << ackTrainDispersion.GetMilliSeconds() <<
-                " ms dRtt=" << deltaRtt.GetMilliSeconds() << " ms");
+  NS_LOG_LOGIC (this << " before: burst=" << m_burstSize << " tx_timer=" << m_txTimer.GetDelay()
+                << " atraindisp=" << ackTrainDispersion.GetMilliSeconds()
+                << " ms dRtt=" << deltaRtt.GetMilliSeconds() << " ms");
 
   int64_t denominator = 1 + (deltaRtt.GetMilliSeconds() / ackTrainDispersion.GetMilliSeconds());
 
   m_burstSize = m_burstSize / denominator;
 
-  NS_LOG_LOGIC (this << " after burst=" << m_burstSize << " denominator=" << denominator);
+  if (m_burstSize > m_burstMin)
+    {
+      m_txTimer.SetDelay(MilliSeconds(m_defBurstSize * m_ackDispersion.GetMilliSeconds()));
+    }
+  else
+    {
+      m_txTimer.SetDelay(MilliSeconds(m_lambda * m_defBurstSize * m_ackDispersion.GetMilliSeconds()));
+    }
+
+  NS_LOG_LOGIC (this << " after: burst=" << m_burstSize << " tx_timer=" << m_txTimer.GetDelay());
 }
 
 /**
@@ -250,20 +270,26 @@ TcpNoordwijk::RateAdjustment(const Time& ackTrainDispersion, const Time& deltaRt
  * - \f$B_{0}\f$ as the default burst size
  * - \f$B_{i+1}\f$ as the next burst size
  * - \f$B_{i}\f$ as the actual burst size
- * (opportunely decreased by the number of retransmitted packets)
+ * - \f$\delta_{i} = \frac{Time_{LastAck} - Time_{FirstAck}}{B_{i}}\f$ as the ack dispersion of
+ *   the \f$i\f$-th burst
  *
  * We could define next burst size as:
  *
  * \f$B_{i+1} = B_{i} + \frac{B_{0}-B_{i}}{2}\f$
+ *
+ * We update also the tx_timer here, with the following function:
+ *
+ * \f$TX_TIMER_{i+1} = B_{0} * \delta_{i}\f$
  */
 void
 TcpNoordwijk::RateTracking()
 {
   NS_LOG_FUNCTION(this);
 
-  NS_LOG_LOGIC (this << " burst=" << m_burstSize);
+  NS_LOG_LOGIC (this << " before: burst=" << m_burstSize << " tx_timer=" << m_txTimer.GetDelay());
   m_burstSize = m_burstSize + ((m_defBurstSize - m_burstSize) / 2);
-  NS_LOG_LOGIC (this << " dopo burst=" << m_burstSize);
+  m_txTimer.SetDelay(MilliSeconds(m_defBurstSize * m_ackDispersion));
+  NS_LOG_LOGIC (this << " after: burst=" << m_burstSize << " tx_timer=" << m_txTimer.GetDelay());
 }
 
 /** \brief Received an ACK for a previously unacked segment
@@ -276,13 +302,15 @@ TcpNoordwijk::RateTracking()
  * the burst is arrived; so, we need to take the arrived ack count. These adjustment
  * are made after a fixed number of arrived bursts (called stability factor, an attribute).
  *
- * When the last ack of the last burst is arrived, the size of next burst should be adjusted
- * before all computation substracting the retransmitted packets count. After that,
- * we compare the difference between the <i>lastest RTT</i> and the minimun RTT. If it is greater
+ * When the last ack of the last burst is arrived, we compare the difference between
+ * the <i>lastest RTT</i> and the minimun RTT. If it is greater
  * than a fixed value, called congestion thresold (an attribute for TCP Noordwijk) it enters
  * the Rate Adjustment algorithm (control the congestion), implemented in the
  * TcpNoordwijk::RateAdjustment method, otherwise it enters into
  * Rate Tracking algorithm, implemented in TcpNoordwijk::RateTracking method.
+ *
+ * After that, or when we are receiving the j-th burst (with j < stab_factor) we should
+ * compute final burst dimension taking care of packets loss or burst re-inizialization.
  *
  * Packet losses are detected (and recovered) by the TcpNoordwijk::DupAck method, or when
  * a timeout expires by TcpNoordwijk::Retransmit method.
@@ -313,6 +341,8 @@ TcpNoordwijk::NewAck (SequenceNumber32 const& ack)
                     (Simulator::Now () + m_rto.Get ()).GetSeconds ());
       m_retxEvent = Simulator::Schedule (m_rto, &TcpNoordwijk::ReTxTimeout, this);
 
+      /* Noordwijk operations START */
+
       if (m_minRtt > m_lastRtt)
         {
           NS_LOG_LOGIC(this << " Min. RTT found, value=" << m_lastRtt.Get().GetMilliSeconds() << " ms");
@@ -335,11 +365,35 @@ TcpNoordwijk::NewAck (SequenceNumber32 const& ack)
       else if (m_ackCount >= m_burstSize)
         {
           Time ackTrainDispersion = (Simulator::Now () - m_firstAck);
-          //Time deltaPiccolo = Time::FromInteger(ackTrainDispersion.GetMilliSeconds()/m_burstSize,
-          //                                      Time::MS);
+          Time ackDispersion      = MilliSeconds(ackTrainDispersion.GetMilliSeconds() / m_burstSize);
 
-          NS_LOG_LOGIC(this << " ACK train completed. aTrainDisp=" <<
-                       ackTrainDispersion.GetMilliSeconds() << " ms");
+          if (m_burstSize == m_defBurstSize)
+            {
+              m_ackDispersion = ackDispersion;
+            }
+
+          NS_LOG_LOGIC(this << " ACK train completed. aTrainDisp="
+                       << ackTrainDispersion.GetMilliSeconds() << " ms, ackDisp=" << ackDispersion
+                       << " but I use " << m_ackDispersion << " ms.");
+
+          // Train and stability factor check
+          ++m_trainReceived;
+
+          if (m_trainReceived == m_stabFactor)
+            {
+              NS_LOG_LOGIC(this << " lastRtt=" << m_lastRtt.Get().GetMilliSeconds() <<
+                           " min=" << m_minRtt.GetMilliSeconds());
+              if (m_lastRtt-m_minRtt > m_congThresold)
+                {
+                  RateAdjustment(ackTrainDispersion, m_lastRtt-m_minRtt);
+                }
+              else
+                {
+                  RateTracking();
+                }
+
+              m_trainReceived = 0;
+            }
 
           // Are there some retransmitted packet? If not, it is ininfluent.
           m_burstSize -= m_packetsRetransmitted;
@@ -357,24 +411,6 @@ TcpNoordwijk::NewAck (SequenceNumber32 const& ack)
               m_restore = false;
             }
 
-          // Train and stability factor check
-          ++m_trainReceived;
-
-          if (m_trainReceived == m_stabFactor)
-            {
-              NS_LOG_LOGIC(this << " lastRtt=" << m_lastRtt.Get().GetMilliSeconds() <<
-                           " min=" << m_minRtt.GetMilliSeconds());
-              if (m_lastRtt-m_minRtt > m_congThresold)
-                {
-                  RateAdjustment(ackTrainDispersion, m_lastRtt-m_minRtt);
-                }
-              else
-                {
-                  RateTracking();
-                }
-              m_trainReceived = 0;
-            }
-
           m_minRtt = Time::Max();
           m_ackCount = 0;
           m_firstAck = Time::FromInteger(0, Time::MS);
@@ -383,6 +419,8 @@ TcpNoordwijk::NewAck (SequenceNumber32 const& ack)
           SendPendingData (m_connected);
         }
     }
+
+  /* Noordwijk operations END */
 
   if (m_rWnd.Get () == 0 && m_persistEvent.IsExpired ())
     { // Zero window: Enter persist state to send 1 byte to probe
