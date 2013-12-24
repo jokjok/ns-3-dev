@@ -172,6 +172,7 @@ TcpNoordwijk::SendPendingData (bool withAck)
   // Wait buffer filling
   if (m_txBuffer.SizeFromSequence (m_nextTxSequence) < std::min(m_segmentSize, AvailableWindow()) * m_burstSize)
     {
+      NS_LOG_LOGIC(this << " No enough data in the buffer");
       return true;
     }
 
@@ -182,17 +183,20 @@ TcpNoordwijk::SendPendingData (bool withAck)
       return true; // Actually we don't want to send, so no error..
     }
 
+  // Don't send if we need to wait for a larger Tx window (prevent silly window syndrome)
+  if (AvailableWindow() < m_segmentSize*m_burstSize && m_txBuffer.SizeFromSequence (m_nextTxSequence) > AvailableWindow())
+    {
+      NS_LOG_LOGIC(this << " No enough window to transmit");
+      NS_LOG_LOGIC("AW: " << AvailableWindow() << " m_segment: " << m_segmentSize << " size: "
+                   << m_txBuffer.SizeFromSequence(m_nextTxSequence));
+      return true;
+    }
+
   while (m_txBuffer.SizeFromSequence (m_nextTxSequence) && packetSent < m_burstSize)
     {
       NS_LOG_LOGIC (this << " usedburst=" << packetSent <<
                    " next_tx=" << m_nextTxSequence << " so I expect ack=" <<
                    m_nextTxSequence+m_segmentSize);
-
-      // Stop sending if we need to wait for a larger Tx window (prevent silly window syndrome)
-      if (AvailableWindow() < m_segmentSize && m_txBuffer.SizeFromSequence (m_nextTxSequence) > AvailableWindow())
-        {
-          break; // No more
-        }
 
       uint32_t s = std::min (AvailableWindow (), m_segmentSize);  // Send no more than window
       uint32_t sz = SendDataPacket (m_nextTxSequence, s, withAck);
@@ -238,7 +242,7 @@ void
 TcpNoordwijk::RateAdjustment(const Time& ackTrainDispersion, const Time& deltaRtt)
 {
   NS_LOG_FUNCTION(this << ackTrainDispersion << deltaRtt);
-  NS_LOG_LOGIC (this << " before: burst=" << m_burstSize << " tx_timer=" << m_txTimer.GetDelay()
+  NS_LOG_LOGIC (this << " before: burst=" << m_burstSize << " tx_timer=" << m_txTime.Get().GetMilliSeconds()
                 << " atraindisp=" << ackTrainDispersion.GetMilliSeconds()
                 << " ms dRtt=" << deltaRtt.GetMilliSeconds() << " ms");
 
@@ -248,14 +252,14 @@ TcpNoordwijk::RateAdjustment(const Time& ackTrainDispersion, const Time& deltaRt
 
   if (m_burstSize > m_burstMin)
     {
-      m_txTimer.SetDelay(MilliSeconds(m_defBurstSize * m_ackDispersion.GetMilliSeconds()));
+      m_txTime = MilliSeconds(m_defBurstSize * m_ackDispersion.GetMilliSeconds());
     }
   else
     {
-      m_txTimer.SetDelay(MilliSeconds(m_lambda * m_defBurstSize * m_ackDispersion.GetMilliSeconds()));
+      m_txTime = MilliSeconds(m_lambda * m_defBurstSize * m_ackDispersion.GetMilliSeconds());
     }
 
-  NS_LOG_LOGIC (this << " after: burst=" << m_burstSize << " tx_timer=" << m_txTimer.GetDelay());
+  NS_LOG_LOGIC (this << " after: burst=" << m_burstSize << " tx_timer=" << m_txTime.Get().GetMilliSeconds());
 }
 
 /**
@@ -286,10 +290,11 @@ TcpNoordwijk::RateTracking()
 {
   NS_LOG_FUNCTION(this);
 
-  NS_LOG_LOGIC (this << " before: burst=" << m_burstSize << " tx_timer=" << m_txTimer.GetDelay());
+  NS_LOG_LOGIC (this << " before: burst=" << m_burstSize << " tx_time=" << m_txTime.Get().GetMilliSeconds()
+                << " AckDisp: " << m_ackDispersion.GetMilliSeconds() << " ms");
   m_burstSize = m_burstSize + ((m_defBurstSize - m_burstSize) / 2);
-  m_txTimer.SetDelay(MilliSeconds(m_defBurstSize * m_ackDispersion));
-  NS_LOG_LOGIC (this << " after: burst=" << m_burstSize << " tx_timer=" << m_txTimer.GetDelay());
+  m_txTime = MilliSeconds(m_defBurstSize * m_ackDispersion.GetMilliSeconds());
+  NS_LOG_LOGIC (this << " after: burst=" << m_burstSize << " tx_timer=" << m_txTime.Get().GetMilliSeconds() << " ms");
 }
 
 /** \brief Received an ACK for a previously unacked segment
